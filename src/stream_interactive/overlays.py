@@ -15,7 +15,9 @@ Design Guiding Principles:
 - Graceful Custom Image Support: Displays custom image if and only if validly provided in event payload, with instant vector fallback.
 - Instant Frame-1 State Reset: Cancels all previous running timers & animations on rapid re-click without stuck states.
 - In-repo Studio Audio: Authentic casino/foley recordings for cards, chips, dice, and clicks.
-- Result lock: the event payload is authoritative; animation and physics never redraw the game result.
+- Settlement truth: visible throw results are read from sleeping physics bodies;
+  event-replay chooses the reproducible initial seed before rendering so an
+  already-accounted event can be presented without mid-flight pose correction.
 """
 
 from __future__ import annotations
@@ -33,7 +35,7 @@ def render_game_overlay_html(
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>Stream Interactive Workbench - {mode.upper()}</title>
+  <title>StreamSuite OBS Cinema Game Overlay - {mode.upper()}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     :root {{
@@ -2644,7 +2646,7 @@ def render_game_overlay_html(
         </div>
         <div class="gashapon-cabinet">
           <div class="cabinet-chrome"></div>
-          <div class="cabinet-sticker">INTERACTIVE LAB<small>CAPSULE TOYS</small></div>
+          <div class="cabinet-sticker">STREAMSUITE<small>CAPSULE TOYS</small></div>
           <div class="cabinet-controls">
             <div class="coin-slot">
               <div class="coin-slot-hole"></div>
@@ -2693,7 +2695,7 @@ def render_game_overlay_html(
         <div id="card-flipper" class="card-3d-flipper">
           <div class="card-face card-back-side">
             <img id="card-back-img" src="/assets/ui/card_back_gold.png" class="card-back-full-img" alt="card-back" />
-            <div class="card-back-brand">✦ INTERACTIVE ✦</div>
+            <div class="card-back-brand">✦ STREAMSUITE ✦</div>
           </div>
           <div id="card-front" class="card-face card-front-side rarity-ssr">
             <div id="gacha-rarity-badge" class="rarity-badge ssr">✦ SSR ✦</div>
@@ -2751,7 +2753,7 @@ def render_game_overlay_html(
           <div class="coin-face coin-face-heads">
             <div class="coin-relief-ring">
               <div class="coin-emblem">👑</div>
-              <div class="coin-text-top">INTERACTIVE</div>
+              <div class="coin-text-top">STREAMSUITE</div>
               <div class="coin-text-bottom">★ 2026 ★</div>
             </div>
           </div>
@@ -2945,6 +2947,8 @@ def render_game_overlay_html(
   </div>
 
   <script src="{asset_prefix}/vendor/three.min.js"></script>
+  <script src="{asset_prefix}/vendor/cannon-es.min.js"></script>
+  <script src="{asset_prefix}/throw_physics.js"></script>
   <script>
     const WS_PATH = "{ws_path}";
     const MODE = "{mode}";
@@ -4307,7 +4311,7 @@ def render_game_overlay_html(
     }}
 
     // =========================================================================
-    // 3D 物理引擎 (reusable 3D Rigid Body Physics Engine with WebGL Three.js)
+    // 3D 物理引擎 (StreamSuite 3D Rigid Body Physics Engine with WebGL Three.js)
     // =========================================================================
     let dicePhysicsWorld = null;
     let gamblePhysicsWorld = null;
@@ -4666,7 +4670,7 @@ def render_game_overlay_html(
           ctx.fillText(heads ? "♛" : "★", center, 238);
           ctx.font = "900 27px sans-serif";
           ctx.letterSpacing = "6px";
-          ctx.fillText(heads ? "INTERACTIVE" : "FORTUNE", center, 365);
+          ctx.fillText(heads ? "STREAMSUITE" : "FORTUNE", center, 365);
           ctx.font = "800 21px sans-serif";
           ctx.fillText(heads ? "★ 2026 ★" : "★ 1 GOLD ★", center, 405);
           return c;
@@ -4837,382 +4841,24 @@ def render_game_overlay_html(
       }}
     }}
 
-    // Dice-only rigid-body helpers.  The previous implementation treated the
-    // rendered cube as a sphere and corrected its Euler angles at the end.
-    // These helpers keep the existing lightweight overlay architecture, but
-    // use a box support point, quaternion orientation, contact impulses and
-    // angular friction for the dice path.
-    const DICE_DEG2RAD = Math.PI / 180;
-
-    function diceQuatNormalize(q) {{
-      const len = Math.hypot(q.x, q.y, q.z, q.w);
-      if (len < 1e-9) return {{ x: 0, y: 0, z: 0, w: 1 }};
-      return {{ x: q.x / len, y: q.y / len, z: q.z / len, w: q.w / len }};
-    }}
-
-    function diceQuatMultiply(a, b) {{
-      return {{
-        x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
-        y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
-        z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
-        w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z
-      }};
-    }}
-
-    function diceQuatConjugate(q) {{
-      return {{ x: -q.x, y: -q.y, z: -q.z, w: q.w }};
-    }}
-
-    function diceQuatFromEulerXYZ(rx, ry, rz) {{
-      const cx = Math.cos(rx * 0.5);
-      const sx = Math.sin(rx * 0.5);
-      const cy = Math.cos(ry * 0.5);
-      const sy = Math.sin(ry * 0.5);
-      const cz = Math.cos(rz * 0.5);
-      const sz = Math.sin(rz * 0.5);
-      return diceQuatNormalize({{
-        x: sx * cy * cz - cx * sy * sz,
-        y: cx * sy * cz + sx * cy * sz,
-        z: cx * cy * sz - sx * sy * cz,
-        w: cx * cy * cz + sx * sy * sz
-      }});
-    }}
-
-    function diceQuatToEulerXYZ(q) {{
-      const sinr = 2 * (q.w * q.x + q.y * q.z);
-      const cosr = 1 - 2 * (q.x * q.x + q.y * q.y);
-      const rx = Math.atan2(sinr, cosr);
-      const sinp = Math.max(-1, Math.min(1, 2 * (q.w * q.y - q.z * q.x)));
-      const ry = Math.asin(sinp);
-      const siny = 2 * (q.w * q.z + q.x * q.y);
-      const cosy = 1 - 2 * (q.y * q.y + q.z * q.z);
-      const rz = Math.atan2(siny, cosy);
-      return {{
-        rx: rx / DICE_DEG2RAD,
-        ry: ry / DICE_DEG2RAD,
-        rz: rz / DICE_DEG2RAD
-      }};
-    }}
-
-    function diceQuatToCssMatrix3d(q) {{
-      // Map the physics world into the same 64deg camera tilt as the CSS
-      // tabletop, without an Euler conversion (and therefore without
-      // gimbal-lock jumps or a different CSS rotation order near settlement).
-      const xx = q.x * q.x;
-      const yy = q.y * q.y;
-      const zz = q.z * q.z;
-      const xy = q.x * q.y;
-      const xz = q.x * q.z;
-      const yz = q.y * q.z;
-      const xw = q.x * q.w;
-      const yw = q.y * q.w;
-      const zw = q.z * q.w;
-      const r00 = 1 - 2 * (yy + zz);
-      const r01 = 2 * (xy - zw);
-      const r02 = 2 * (xz + yw);
-      const r10 = 2 * (xy + zw);
-      const r11 = 1 - 2 * (xx + zz);
-      const r12 = 2 * (yz - xw);
-      const r20 = 2 * (xz - yw);
-      const r21 = 2 * (yz + xw);
-      const r22 = 1 - 2 * (xx + yy);
-      const cameraSin = Math.sin(64 * DICE_DEG2RAD);
-      const cameraCos = Math.cos(64 * DICE_DEG2RAD);
-      // M = cameraBasis * quaternionRotation. CSS matrix3d is column-major;
-      // the camera basis itself accounts for the screen's downward-positive Y.
-      const m00 = r00;
-      const m01 = r01;
-      const m02 = r02;
-      const m10 = -cameraSin * r10 + cameraCos * r20;
-      const m11 = -cameraSin * r11 + cameraCos * r21;
-      const m12 = -cameraSin * r12 + cameraCos * r22;
-      const m20 = cameraCos * r10 + cameraSin * r20;
-      const m21 = cameraCos * r11 + cameraSin * r21;
-      const m22 = cameraCos * r12 + cameraSin * r22;
-      return `matrix3d(${{m00}},${{m10}},${{m20}},0,${{m01}},${{m11}},${{m21}},0,${{m02}},${{m12}},${{m22}},0,0,0,0,1)`;
-    }}
-
-    function diceQuatIntegrateWorld(q, wx, wy, wz, dt) {{
-      const omega = {{ x: wx, y: wy, z: wz, w: 0 }};
-      const derivative = diceQuatMultiply(omega, q);
-      return diceQuatNormalize({{
-        x: q.x + derivative.x * 0.5 * dt,
-        y: q.y + derivative.y * 0.5 * dt,
-        z: q.z + derivative.z * 0.5 * dt,
-        w: q.w + derivative.w * 0.5 * dt
-      }});
-    }}
-
-    function diceRotateVector(q, v) {{
-      const rotated = diceQuatMultiply(
-        diceQuatMultiply(q, {{ x: v.x, y: v.y, z: v.z, w: 0 }}),
-        diceQuatConjugate(q)
-      );
-      return {{ x: rotated.x, y: rotated.y, z: rotated.z }};
-    }}
-
-    function diceDot(a, b) {{
-      return a.x * b.x + a.y * b.y + a.z * b.z;
-    }}
-
-    function diceCross(a, b) {{
-      return {{
-        x: a.y * b.z - a.z * b.y,
-        y: a.z * b.x - a.x * b.z,
-        z: a.x * b.y - a.y * b.x
-      }};
-    }}
-
-    function diceQuatFromAxisAngle(axis, angle) {{
-      const half = angle * 0.5;
-      const sine = Math.sin(half);
-      return diceQuatNormalize({{
-        x: axis.x * sine,
-        y: axis.y * sine,
-        z: axis.z * sine,
-        w: Math.cos(half)
-      }});
-    }}
-
-    function diceQuatSlerp(a, b, amount) {{
-      let bx = b.x;
-      let by = b.y;
-      let bz = b.z;
-      let bw = b.w;
-      let cosine = a.x * bx + a.y * by + a.z * bz + a.w * bw;
-      if (cosine < 0) {{
-        cosine = -cosine;
-        bx = -bx;
-        by = -by;
-        bz = -bz;
-        bw = -bw;
-      }}
-      if (cosine > 0.9995) {{
-        return diceQuatNormalize({{
-          x: a.x + (bx - a.x) * amount,
-          y: a.y + (by - a.y) * amount,
-          z: a.z + (bz - a.z) * amount,
-          w: a.w + (bw - a.w) * amount
-        }});
-      }}
-      const angle = Math.acos(Math.max(-1, Math.min(1, cosine)));
-      const sine = Math.sin(angle);
-      const fromWeight = Math.sin((1 - amount) * angle) / sine;
-      const toWeight = Math.sin(amount * angle) / sine;
-      return diceQuatNormalize({{
-        x: a.x * fromWeight + bx * toWeight,
-        y: a.y * fromWeight + by * toWeight,
-        z: a.z * fromWeight + bz * toWeight,
-        w: a.w * fromWeight + bw * toWeight
-      }});
-    }}
-
-    function diceQuatAlignLocalNormal(q, localNormal) {{
-      const current = diceRotateVector(q, localNormal);
-      const up = {{ x: 0, y: 1, z: 0 }};
-      const dot = Math.max(-1, Math.min(1, diceDot(current, up)));
-      let axis = diceCross(current, up);
-      let axisLength = Math.hypot(axis.x, axis.y, axis.z);
-      if (axisLength < 1e-5) {{
-        axis = Math.abs(current.x) < 0.7
-          ? {{ x: 1, y: 0, z: 0 }}
-          : {{ x: 0, y: 0, z: 1 }};
-        axisLength = 1;
-      }}
-      axis = {{ x: axis.x / axisLength, y: axis.y / axisLength, z: axis.z / axisLength }};
-      return diceQuatMultiply(diceQuatFromAxisAngle(axis, Math.acos(dot)), q);
-    }}
-
-    function diceSupportPoint(body, direction) {{
-      const localDirection = diceRotateVector(diceQuatConjugate(body.q), direction);
-      const h = body.halfExtent;
-      const localPoint = {{
-        x: localDirection.x >= 0 ? h : -h,
-        y: localDirection.y >= 0 ? h : -h,
-        z: localDirection.z >= 0 ? h : -h
-      }};
-      const worldOffset = diceRotateVector(body.q, localPoint);
-      return {{
-        x: body.x + worldOffset.x,
-        y: body.y + worldOffset.y,
-        z: body.z + worldOffset.z
-      }};
-    }}
-
-    function coinSupportPoint(body, direction) {{
-      // Coin local +/-Z are the two faces; X/Y form the circular rim.
-      const localDirection = diceRotateVector(diceQuatConjugate(body.q), direction);
-      const radial = Math.hypot(localDirection.x, localDirection.y);
-      const radialScale = radial > 1e-9 ? body.radius / radial : 0;
-      const localPoint = {{
-        x: localDirection.x * radialScale,
-        y: localDirection.y * radialScale,
-        z: localDirection.z >= 0 ? body.halfThickness : -body.halfThickness
-      }};
-      const worldOffset = diceRotateVector(body.q, localPoint);
-      return {{
-        x: body.x + worldOffset.x,
-        y: body.y + worldOffset.y,
-        z: body.z + worldOffset.z
-      }};
-    }}
-
-    function physicsSupportPoint(body, direction) {{
-      return body.shape === "coin"
-        ? coinSupportPoint(body, direction)
-        : diceSupportPoint(body, direction);
-    }}
-
-    function diceBottomContacts(body) {{
-      const h = body.halfExtent;
-      const points = [];
-      let minY = Infinity;
-      for (const sx of [-1, 1]) {{
-        for (const sy of [-1, 1]) {{
-          for (const sz of [-1, 1]) {{
-            const offset = diceRotateVector(body.q, {{ x: sx * h, y: sy * h, z: sz * h }});
-            const point = {{
-              x: body.x + offset.x,
-              y: body.y + offset.y,
-              z: body.z + offset.z
-            }};
-            if (point.y < minY - 0.18) {{
-              minY = point.y;
-              points.length = 0;
-              points.push(point);
-            }} else if (Math.abs(point.y - minY) <= 0.18) {{
-              points.push(point);
-            }}
-          }}
-        }}
-      }}
-      return {{ minY, points }};
-    }}
-
-    function diceFloorContact(body) {{
-      // 平放的方骰有一整個底面，不應用單一角點代表接觸。
-      // 取所有最低頂點的平均位置，平放時支撐力會穿過重心，
-      // 只有真正傾斜／滾動時才會產生回正力矩。
-      if (body.shape === "box") {{
-        const contacts = diceBottomContacts(body);
-        if (contacts.points.length > 0) {{
-          const point = contacts.points.reduce((sum, value) => ({{
-            x: sum.x + value.x,
-            y: sum.y + value.y,
-            z: sum.z + value.z
-          }}), {{ x: 0, y: 0, z: 0 }});
-          const count = contacts.points.length;
-          return {{
-            minY: contacts.minY,
-            point: {{ x: point.x / count, y: point.y / count, z: point.z / count }}
-          }};
-        }}
-      }}
-      const point = physicsSupportPoint(body, {{ x: 0, y: -1, z: 0 }});
-      return {{ minY: point.y, point }};
-    }}
-
-    function diceBoxBoxContact(a, b) {{
-      // Full OBB separating-axis test (3 face axes per box plus 9 edge
-      // cross-products).  The previous centre-line overlap test produced
-      // false contacts between nearby but separated dice, which could hold a
-      // die in mid-air or keep pushing an already-flat die forever.
-      const axesA = [
-        diceRotateVector(a.q, {{ x: 1, y: 0, z: 0 }}),
-        diceRotateVector(a.q, {{ x: 0, y: 1, z: 0 }}),
-        diceRotateVector(a.q, {{ x: 0, y: 0, z: 1 }})
-      ];
-      const axesB = [
-        diceRotateVector(b.q, {{ x: 1, y: 0, z: 0 }}),
-        diceRotateVector(b.q, {{ x: 0, y: 1, z: 0 }}),
-        diceRotateVector(b.q, {{ x: 0, y: 0, z: 1 }})
-      ];
-      const delta = {{ x: b.x - a.x, y: b.y - a.y, z: b.z - a.z }};
-      let bestNormal = null;
-      let bestPenetration = Infinity;
-
-      const testAxis = (rawAxis) => {{
-        const length = Math.hypot(rawAxis.x, rawAxis.y, rawAxis.z);
-        if (length < 1e-6) return true;
-        let axis = {{ x: rawAxis.x / length, y: rawAxis.y / length, z: rawAxis.z / length }};
-        const distanceSigned = diceDot(delta, axis);
-        // Match the visibly rounded dice more closely than a sharp-cornered
-        // cube.  A rounded box is a smaller core box swept by a bevel sphere:
-        // face-to-face extent stays exact, while diagonal/corner extent is
-        // reduced so three dice cannot form an unrealistically perfect wedge.
-        const bevelA = a.halfExtent * 0.14;
-        const bevelB = b.halfExtent * 0.14;
-        const radiusA = (a.halfExtent - bevelA) * axesA.reduce((sum, basis) => sum + Math.abs(diceDot(axis, basis)), 0) + bevelA;
-        const radiusB = (b.halfExtent - bevelB) * axesB.reduce((sum, basis) => sum + Math.abs(diceDot(axis, basis)), 0) + bevelB;
-        const penetration = radiusA + radiusB - Math.abs(distanceSigned);
-        if (penetration <= 0) return false;
-        if (penetration < bestPenetration) {{
-          if (distanceSigned < 0) axis = {{ x: -axis.x, y: -axis.y, z: -axis.z }};
-          bestNormal = axis;
-          bestPenetration = penetration;
-        }}
-        return true;
-      }};
-
-      for (const axis of axesA) if (!testAxis(axis)) return null;
-      for (const axis of axesB) if (!testAxis(axis)) return null;
-      for (const axisA of axesA) {{
-        for (const axisB of axesB) {{
-          if (!testAxis(diceCross(axisA, axisB))) return null;
-        }}
-      }}
-      return bestNormal ? {{ normal: bestNormal, penetration: bestPenetration }} : null;
-    }}
-
-    function diceFaceUpFromQuaternion(q) {{
-      // This is the same face layout used by the CSS and WebGL dice:
-      // +Z=1, +X=2, -Z=3, -X=4, -Y=5, +Y=6.
-      const faces = [
-        {{ value: 1, normal: {{ x: 0, y: 0, z: 1 }} }},
-        {{ value: 2, normal: {{ x: 1, y: 0, z: 0 }} }},
-        {{ value: 3, normal: {{ x: 0, y: 0, z: -1 }} }},
-        {{ value: 4, normal: {{ x: -1, y: 0, z: 0 }} }},
-        {{ value: 5, normal: {{ x: 0, y: -1, z: 0 }} }},
-        {{ value: 6, normal: {{ x: 0, y: 1, z: 0 }} }}
-      ];
-      let best = {{ value: 1, alignment: -Infinity }};
-      for (const face of faces) {{
-        const normal = diceRotateVector(q, face.normal);
-        if (normal.y > best.alignment) {{
-          best = {{ value: face.value, alignment: normal.y, normal }};
-        }}
-      }}
-      return best;
-    }}
-
-    function diceLocalNormalForFace(value) {{
-      // Keep one authoritative face-to-normal table for CSS, WebGL and the
-      // low-energy result assist.  A result assist may guide the last part of
-      // a landing, but it must never replace the physical face geometry.
-      const normals = {{
-        1: {{ x: 0, y: 0, z: 1 }},
-        2: {{ x: 1, y: 0, z: 0 }},
-        3: {{ x: 0, y: 0, z: -1 }},
-        4: {{ x: -1, y: 0, z: 0 }},
-        5: {{ x: 0, y: -1, z: 0 }},
-        6: {{ x: 0, y: 1, z: 0 }}
-      }};
-      return normals[Number(value)] || null;
-    }}
-
-    function coinFaceUpFromQuaternion(q) {{
-      const headsNormal = diceRotateVector(q, {{ x: 0, y: 0, z: 1 }});
-      const tailsNormal = {{ x: -headsNormal.x, y: -headsNormal.y, z: -headsNormal.z }};
-      // 硬幣不是只有正／反兩種可見狀態；若最後是以邊緣接觸桌面，
-      // 保留第三種結果，避免把一個明顯的側立姿態硬判成正面或反面。
-      const faceAlignment = Math.abs(headsNormal.y);
-      if (faceAlignment < 0.28) {{
-        return {{ value: "?", alignment: faceAlignment, edge: true }};
-      }}
-      return headsNormal.y >= tailsNormal.y
-        ? {{ value: "正面", alignment: headsNormal.y }}
-        : {{ value: "反面", alignment: tailsNormal.y }};
-    }}
+    // Throw physics is implemented by the shared cannon-es adapter.
+    // The browser receives the authoritative event result, but the visible
+    // body is never rotated during settlement.  event-replay selects a seeded
+    // launch trajectory before frame one; natural mode ignores targets and
+    // reports the face produced by the sleeping Cannon body.
+    const {{
+      RigidBody3D,
+      StreamPhysicsWorld,
+      coinFaceUpFromQuaternion,
+      diceDot,
+      diceFaceUpFromQuaternion,
+      diceFloorContact,
+      diceLocalNormalForFace,
+      diceQuatToCssMatrix3d,
+      diceRotateVector,
+      hashSeed,
+      seededRandom
+    }} = window.StreamThrowPhysics;
 
     function normalizeCoinSide(data) {{
       const raw = data && data.side !== undefined
@@ -5226,1051 +4872,6 @@ def render_game_overlay_html(
       if (["正面", "正", "heads", "head", "front", "up"].includes(normalized)) return "正面";
       if (["反面", "反", "tails", "tail", "back", "down"].includes(normalized)) return "反面";
       return null;
-    }}
-
-    function physicsApplyInvInertia(body, impulse) {{
-      if (!body.q || !body.invInertiaLocal) {{
-        const scalar = body.invInertia || 0;
-        return {{ x: impulse.x * scalar, y: impulse.y * scalar, z: impulse.z * scalar }};
-      }}
-      const local = diceRotateVector(diceQuatConjugate(body.q), impulse);
-      const localResult = {{
-        x: local.x * body.invInertiaLocal.x,
-        y: local.y * body.invInertiaLocal.y,
-        z: local.z * body.invInertiaLocal.z
-      }};
-      return diceRotateVector(body.q, localResult);
-    }}
-
-    function diceVelocityAtPoint(body, point) {{
-      const r = {{ x: point.x - body.x, y: point.y - body.y, z: point.z - body.z }};
-      const angularVelocity = body.angularVelocity;
-      const spinVelocity = diceCross(angularVelocity, r);
-      return {{
-        x: body.vx + spinVelocity.x,
-        y: body.vy + spinVelocity.y,
-        z: body.vz + spinVelocity.z
-      }};
-    }}
-
-    function diceImpulseDenominator(body, r, direction) {{
-      const angularArm = diceCross(r, direction);
-      const inverseMass = body.settled ? 0 : (1 / Math.max(0.001, body.mass));
-      if (body.settled) return 0;
-      const angularResponse = physicsApplyInvInertia(body, angularArm);
-      return inverseMass + diceDot(angularArm, angularResponse);
-    }}
-
-    function diceApplyImpulse(body, impulse, point) {{
-      // 已睡眠的骰子視為靜態接觸體；只有足夠強的撞擊才會在
-      // resolveBoxPair() 中先喚醒它，避免低速數值誤差讓骰子反覆晃動。
-      if (body.settled) return;
-      const invMass = 1 / Math.max(0.001, body.mass);
-      body.vx += impulse.x * invMass;
-      body.vy += impulse.y * invMass;
-      body.vz += impulse.z * invMass;
-      const r = {{ x: point.x - body.x, y: point.y - body.y, z: point.z - body.z }};
-      const torque = diceCross(r, impulse);
-      const angularResponse = physicsApplyInvInertia(body, torque);
-      body.angularVelocity.x += angularResponse.x;
-      body.angularVelocity.y += angularResponse.y;
-      body.angularVelocity.z += angularResponse.z;
-    }}
-
-    function diceResolveContact(body, normal, point, restitution, friction, normalLoad) {{
-      let normalImpulse = 0;
-      let contactVelocity = diceVelocityAtPoint(body, point);
-      const velocityAlongNormal = diceDot(contactVelocity, normal);
-      const r = {{ x: point.x - body.x, y: point.y - body.y, z: point.z - body.z }};
-
-      if (velocityAlongNormal < -0.01) {{
-        const denominator = diceImpulseDenominator(body, r, normal);
-        // 接觸速度很低時使用完全非彈性接觸，吸收重力造成的微小
-        // 反覆彈跳；只有真正的撞擊才保留骰子的彈性。
-        const effectiveRestitution = Math.abs(velocityAlongNormal) < 48 ? 0 : restitution;
-        normalImpulse = -(1 + effectiveRestitution) * velocityAlongNormal / denominator;
-        diceApplyImpulse(body, {{
-          x: normal.x * normalImpulse,
-          y: normal.y * normalImpulse,
-          z: normal.z * normalImpulse
-        }}, point);
-      }}
-
-      contactVelocity = diceVelocityAtPoint(body, point);
-      const normalComponent = diceDot(contactVelocity, normal);
-      const tangentVelocity = {{
-        x: contactVelocity.x - normal.x * normalComponent,
-        y: contactVelocity.y - normal.y * normalComponent,
-        z: contactVelocity.z - normal.z * normalComponent
-      }};
-      const tangentSpeed = Math.hypot(tangentVelocity.x, tangentVelocity.y, tangentVelocity.z);
-      if (tangentSpeed > 0.01) {{
-        const tangent = {{
-          x: tangentVelocity.x / tangentSpeed,
-          y: tangentVelocity.y / tangentSpeed,
-          z: tangentVelocity.z / tangentSpeed
-        }};
-        const denominator = diceImpulseDenominator(body, r, tangent);
-        const requested = -tangentSpeed / denominator;
-        const maxFriction = Math.max(normalImpulse, normalLoad || 0) * friction;
-        const tangentImpulse = Math.max(-maxFriction, Math.min(maxFriction, requested));
-        diceApplyImpulse(body, {{
-          x: tangent.x * tangentImpulse,
-          y: tangent.y * tangentImpulse,
-          z: tangent.z * tangentImpulse
-        }}, point);
-      }}
-
-      return Math.max(0, -velocityAlongNormal);
-    }}
-
-    function diceResolvePlaneContact(body, normal, planeOffset, restitution, friction, normalLoad) {{
-      const oppositeNormal = {{ x: -normal.x, y: -normal.y, z: -normal.z }};
-      const isFloor = normal.y > 0.99;
-      let floorContact = isFloor ? diceFloorContact(body) : null;
-      let point = floorContact ? floorContact.point : physicsSupportPoint(body, oppositeNormal);
-      const gap = floorContact ? floorContact.minY - planeOffset : diceDot(point, normal) - planeOffset;
-      if (gap >= 0) return null;
-
-      body.x += normal.x * -gap;
-      body.y += normal.y * -gap;
-      body.z += normal.z * -gap;
-      floorContact = isFloor ? diceFloorContact(body) : null;
-      point = floorContact ? floorContact.point : physicsSupportPoint(body, oppositeNormal);
-      const impactSpeed = diceResolveContact(body, normal, point, restitution, friction, normalLoad);
-      return {{ impactSpeed }};
-    }}
-
-    class RigidBody3D {{
-      constructor(opts) {{
-        this.element = opts.element || null;
-        this.shadowElement = opts.shadowElement || null;
-        this.threeMesh = opts.threeMesh || null;
-        this.shape = opts.shape || "sphere";
-        this.radius = opts.radius || 34;
-        this.halfThickness = opts.halfThickness || 7;
-        this.halfExtent = opts.halfExtent || this.radius;
-        this.mass = opts.mass || 1.0;
-        this.restitution = opts.restitution !== undefined ? opts.restitution : 0.54;
-        this.friction = opts.friction !== undefined ? opts.friction : 0.76;
-        this.surfaceFriction = opts.surfaceFriction !== undefined ? opts.surfaceFriction : 0.82;
-        this.airDrag = opts.airDrag || 0.994;
-        this.rotDamping = opts.rotDamping || 0.985;
-
-        this.x = opts.x || 0;
-        this.y = opts.y !== undefined ? opts.y : 200;
-        this.z = opts.z || 0;
-
-        this.vx = opts.vx || 0;
-        this.vy = opts.vy || 0;
-        this.vz = opts.vz || 0;
-
-        this.rx = opts.rx || 0;
-        this.ry = opts.ry || 0;
-        this.rz = opts.rz || 0;
-
-        this.wx = opts.wx || 0;
-        this.wy = opts.wy || 0;
-        this.wz = opts.wz || 0;
-
-        this.boundingRadius = this.shape === "box"
-          ? this.halfExtent * Math.sqrt(3)
-          : (this.shape === "coin" ? Math.hypot(this.radius, this.halfThickness) : this.radius);
-        this.q = (this.shape === "box" || this.shape === "coin")
-          ? diceQuatFromEulerXYZ(
-              -(this.rx || 0) * DICE_DEG2RAD,
-              (this.ry || 0) * DICE_DEG2RAD,
-              (this.rz || 0) * DICE_DEG2RAD
-            )
-          : null;
-        // The cube is isotropic, but a coin is not: rotating around its face
-        // normal is much easier than rotating it over its rim.  Keeping this
-        // tensor in body-local space makes contact impulses physically
-        // consistent without introducing a second physics dependency.
-        this.invInertia = this.shape === "box"
-          ? 6 / (Math.max(0.001, this.mass) * Math.pow(this.halfExtent * 2, 2))
-          : (this.shape === "coin"
-            ? 2 / (Math.max(0.001, this.mass) * Math.pow(this.radius, 2))
-            : 0);
-        if (this.shape === "box") {{
-          this.invInertiaLocal = {{ x: this.invInertia, y: this.invInertia, z: this.invInertia }};
-        }} else if (this.shape === "coin") {{
-          const coinMass = Math.max(0.001, this.mass);
-          const coinDiameter = this.halfThickness * 2;
-          const radialInertia = (coinMass / 12) * (3 * this.radius * this.radius + coinDiameter * coinDiameter);
-          const axialInertia = 0.5 * coinMass * this.radius * this.radius;
-          this.invInertiaLocal = {{
-            x: 1 / Math.max(0.001, radialInertia),
-            y: 1 / Math.max(0.001, radialInertia),
-            z: 1 / Math.max(0.001, axialInertia)
-          }};
-        }} else {{
-          this.invInertiaLocal = {{ x: 0, y: 0, z: 0 }};
-        }}
-        this.angularVelocity = (this.shape === "box" || this.shape === "coin")
-          ? {{
-              x: (this.wx || 0) * DICE_DEG2RAD,
-              y: (this.wy || 0) * DICE_DEG2RAD,
-              z: (this.wz || 0) * DICE_DEG2RAD
-            }}
-          : null;
-        this.shadowOpacity = opts.shadowOpacity !== undefined ? opts.shadowOpacity : 0.75;
-        this.targetFace = this.shape === "box" && Number.isInteger(Number(opts.targetFace)) &&
-          Number(opts.targetFace) >= 1 && Number(opts.targetFace) <= 6
-          ? Number(opts.targetFace)
-          : null;
-        this.targetCoinSide = this.shape === "coin" &&
-          (opts.targetCoinSide === "正面" || opts.targetCoinSide === "反面")
-          ? opts.targetCoinSide
-          : null;
-        this.restTime = 0;
-        this.unstableContactTime = 0;
-        this.lastBounceAt = 0;
-        this.settled = false;
-        // 上層骰子可能是落在另一顆骰子上，而不是直接接觸桌面。
-        // 這個接觸只保存碰撞 solver 上一個 fixed step 找到的支撐點，
-        // 下一步再由重力與支撐力矩自然消耗傾斜，不把姿態指定成某個結果。
-        this.supportContact = null;
-        this.onBounce = opts.onBounce || null;
-        this.onWallHit = opts.onWallHit || null;
-      }}
-    }}
-
-    class StreamPhysicsWorld {{
-      constructor(arenaElement, webglEngine = null, tuning = DICE_REFERENCE_DEFAULTS) {{
-        this.arena = arenaElement;
-        this.webglEngine = webglEngine;
-        this.tuning = tuning;
-        this.planeY = THROW_PLANE_CONFIG.worldY;
-        this.bodies = [];
-        this.gravity = -Math.abs(Number(tuning.gravity) || DICE_REFERENCE_DEFAULTS.gravity);
-        this.bounds = {{ minX: -200, maxX: 200, minZ: -100, maxZ: 100 }};
-        this.isRunning = false;
-        this.lastTime = 0;
-        this.rafId = null;
-        // 固定時間步進避免掉幀時穿透地面／骰子，畫面仍以 RAF 速度更新。
-        this.fixedDt = 1 / 120;
-        this.accumulator = 0;
-        this.maxSubSteps = 8;
-        this.onSettled = null;
-      }}
-
-      addBody(b) {{
-        this.bodies.push(b);
-      }}
-
-      start() {{
-        this.stop();
-        this.isRunning = true;
-        this.lastTime = performance.now();
-        this.accumulator = 0;
-        const loop = (now) => {{
-          if (!this.isRunning) return;
-          let dt = (now - this.lastTime) / 1000;
-          this.lastTime = now;
-          // 暫停／切窗回來時最多追趕 50ms，避免一次大步驟把物體打穿碰撞面。
-          dt = Math.min(0.05, Math.max(0, dt));
-          this.accumulator += dt;
-
-          let subSteps = 0;
-          while (this.accumulator >= this.fixedDt && subSteps < this.maxSubSteps) {{
-            this.step(this.fixedDt);
-            this.accumulator -= this.fixedDt;
-            subSteps++;
-          }}
-          if (subSteps === this.maxSubSteps && this.accumulator > this.fixedDt * 2) {{
-            this.accumulator = 0;
-          }}
-          this.render();
-
-          const allSettled = this.bodies.every(b => b.settled);
-          if (allSettled) {{
-            this.isRunning = false;
-            if (this.onSettled) this.onSettled(this.bodies.map(body => body.finalFace));
-            this.render();
-            return;
-          }}
-
-          this.rafId = requestAnimationFrame(loop);
-        }};
-        this.render();
-        this.rafId = requestAnimationFrame(loop);
-      }}
-
-      stop() {{
-        this.isRunning = false;
-        if (this.rafId) {{
-          cancelAnimationFrame(this.rafId);
-          this.rafId = null;
-        }}
-      }}
-
-      stepBoxBody(b, dt) {{
-        const angular = b.angularVelocity;
-        b.vy += this.gravity * dt;
-        b.vx *= Math.pow(b.airDrag, dt * 60);
-        b.vy *= Math.pow(b.airDrag, dt * 60);
-        b.vz *= Math.pow(b.airDrag, dt * 60);
-        const angularDamping = Math.pow(b.rotDamping, dt * 60);
-        angular.x *= angularDamping;
-        angular.y *= angularDamping;
-        angular.z *= angularDamping;
-
-        b.x += b.vx * dt;
-        b.y += b.vy * dt;
-        b.z += b.vz * dt;
-        b.q = diceQuatIntegrateWorld(b.q, angular.x, angular.y, angular.z, dt);
-
-        const now = performance.now();
-        const floorHit = diceResolvePlaneContact(
-          b,
-          {{ x: 0, y: 1, z: 0 }},
-          this.planeY,
-          b.restitution,
-          b.friction,
-          Math.abs(this.gravity) * b.mass * dt
-        );
-        diceResolvePlaneContact(
-          b,
-          {{ x: 1, y: 0, z: 0 }},
-          this.bounds.minX,
-          b.restitution * 0.82,
-          b.friction,
-          0
-        );
-        diceResolvePlaneContact(
-          b,
-          {{ x: -1, y: 0, z: 0 }},
-          -this.bounds.maxX,
-          b.restitution * 0.82,
-          b.friction,
-          0
-        );
-        diceResolvePlaneContact(
-          b,
-          {{ x: 0, y: 0, z: 1 }},
-          this.bounds.minZ,
-          b.restitution * 0.82,
-          b.friction,
-          0
-        );
-        diceResolvePlaneContact(
-          b,
-          {{ x: 0, y: 0, z: -1 }},
-          -this.bounds.maxZ,
-          b.restitution * 0.82,
-          b.friction,
-          0
-        );
-
-        if (floorHit && floorHit.impactSpeed > 70 && now - b.lastBounceAt > 75) {{
-          b.lastBounceAt = now;
-          if (b.onBounce) b.onBounce(floorHit.impactSpeed);
-        }}
-
-        const horizontalSpeed = Math.hypot(b.vx, b.vz);
-        const angularSpeed = Math.hypot(angular.x, angular.y, angular.z);
-        let faceState = b.shape === "coin"
-          ? coinFaceUpFromQuaternion(b.q)
-          : diceFaceUpFromQuaternion(b.q);
-        let floorContact = diceFloorContact(b);
-        let supportY = floorContact.minY;
-        // Keep the contact tolerance sub-pixel.  A broad 0.45px band could
-        // classify a corner hovering just above the plane as grounded, then
-        // apply damping before gravity had actually made contact.
-        // A cylinder's curved rim needs a slightly wider persistent-contact
-        // band than a cube corner, otherwise it repeatedly drops a fraction
-        // of a pixel and re-bounces instead of dissipating its last spin.
-        const floorTolerance = b.shape === "coin" ? 0.45 : 0.10;
-        const touchingFloor = Boolean(floorHit) || Math.abs(supportY) < floorTolerance;
-        if (!floorHit && touchingFloor && supportY >= 0 && b.vy <= 0) {{
-          // Persistent resting-contact constraint: consume the sub-pixel gap
-          // instead of letting gravity create an endless drop/impact cycle.
-          // This translates the centre to the plane and clears only vertical
-          // velocity; orientation and the eventual face remain untouched.
-          b.y -= supportY;
-          b.vy = 0;
-        }}
-        const targetLocalNormal = b.shape === "box"
-          ? diceLocalNormalForFace(b.targetFace)
-          : (b.targetCoinSide
-            ? {{ x: 0, y: 0, z: b.targetCoinSide === "正面" ? 1 : -1 }}
-            : null);
-        const targetNormal = targetLocalNormal
-          ? diceRotateVector(b.q, targetLocalNormal)
-          : null;
-        const targetAlignment = targetNormal ? targetNormal.y : null;
-        if (targetNormal && touchingFloor && Math.abs(b.vy) < 90 &&
-            horizontalSpeed < 260 && angularSpeed < 7.0) {{
-          // The event result is allowed to influence only the final, already
-          // supported part of the landing. This is a bounded torque, not a
-          // quaternion snap: gravity, contact correction, friction and the
-          // visible face geometry still determine the actual pose.
-          let targetTorque = diceCross(targetNormal, {{ x: 0, y: 1, z: 0 }});
-          let targetTorqueLength = Math.hypot(targetTorque.x, targetTorque.y, targetTorque.z);
-          if (targetTorqueLength < 0.05 && targetAlignment < 0) {{
-            // A face pointing exactly down is the one singular case where
-            // cross(targetNormal, up) has no direction. Pick a stable axis so
-            // the body can leave that unstable upside-down pose.
-            const seed = b.shape === "coin"
-              ? 1
-              : (Number(b.targetFace) % 2 === 0 ? -1 : 1);
-            targetTorque = {{ x: 0, y: 0, z: seed }};
-            targetTorqueLength = 1;
-          }}
-          if (targetTorqueLength > 0.05) {{
-            const targetForceArm = b.shape === "coin"
-              ? b.radius * 0.42
-              : b.halfExtent * 1.05;
-            const approach = Math.max(0.22, Math.min(1.0, (0.94 - targetAlignment) / 1.35));
-            const targetForce = Math.abs(this.gravity) * b.mass * targetForceArm * approach;
-            const targetResponse = physicsApplyInvInertia(b, {{
-              x: targetTorque.x * targetForce,
-              y: targetTorque.y * targetForce,
-              z: targetTorque.z * targetForce
-            }});
-            angular.x += targetResponse.x * dt;
-            angular.y += targetResponse.y * dt;
-            angular.z += targetResponse.z * dt;
-          }}
-        }}
-        if (touchingFloor && (floorHit || supportY <= floorTolerance)) {{
-          // 桌面不是把物體「吸」到某個角度；它提供向上的接觸力，
-          // 接觸點偏離重心時自然產生回正力矩，讓傾斜骰子／硬幣滾到
-          // 真正穩定的面；硬幣靠邊時仍受接觸力矩影響，只有幾乎精確
-          // 平衡在邊緣才會保留 ?，不把普通斜靠誤當成第三面。
-          if (b.shape === "box" || b.shape === "coin") {{
-            const support = floorContact.point;
-            const lever = {{ x: support.x - b.x, y: support.y - b.y, z: support.z - b.z }};
-            const normalForce = {{ x: 0, y: -this.gravity * b.mass, z: 0 }};
-            const restoringTorque = diceCross(lever, normalForce);
-            const response = physicsApplyInvInertia(b, restoringTorque);
-            const torqueScale = b.shape === "coin" ? 0.72 : 0.92;
-            angular.x += response.x * torqueScale * dt;
-            angular.y += response.y * torqueScale * dt;
-            angular.z += response.z * torqueScale * dt;
-            if (b.shape === "coin") {{
-              // A thin cylinder can lose its single rim contact before the
-              // normal-force torque has visibly rotated it.  This is the
-              // equivalent of the broad tabletop contact patch: a gentle
-              // gravity-aligned spring, based only on the current normal,
-              // never on the requested/event result.
-              const headsNormal = diceRotateVector(b.q, {{ x: 0, y: 0, z: 1 }});
-              const desiredNormal = {{ x: 0, y: headsNormal.y >= 0 ? 1 : -1, z: 0 }};
-              const alignmentTorque = diceCross(headsNormal, desiredNormal);
-              const alignmentForce = Math.abs(this.gravity) * b.mass * b.radius * 0.42;
-              const alignmentResponse = physicsApplyInvInertia(b, {{
-                x: alignmentTorque.x * alignmentForce,
-                y: alignmentTorque.y * alignmentForce,
-                z: alignmentTorque.z * alignmentForce
-              }});
-              angular.x += alignmentResponse.x * dt;
-              angular.y += alignmentResponse.y * dt;
-              angular.z += alignmentResponse.z * dt;
-            }}
-          }}
-        }}
-        if (!floorHit && b.supportContact && b.shape === "box") {{
-          // 骰子落在另一顆骰子上時，接觸面的向上反作用力同樣會在
-          // 偏離重心的位置產生回正力矩；否則骰子可能停在半空堆疊，
-          // 永遠進不了 settled 狀態。
-          const support = b.supportContact.point;
-          const lever = {{ x: support.x - b.x, y: support.y - b.y, z: support.z - b.z }};
-          const normalForce = {{ x: 0, y: -this.gravity * b.mass, z: 0 }};
-          const restoringTorque = diceCross(lever, normalForce);
-          const response = physicsApplyInvInertia(b, restoringTorque);
-          angular.x += response.x * 0.72 * dt;
-          angular.y += response.y * 0.72 * dt;
-          angular.z += response.z * 0.72 * dt;
-        }}
-        // 硬幣不能像方骰一樣在大角度斜靠時進入尾段煞車；
-        // 先要求它接近平躺，才能避免「還沒翻平就被煞停」。
-        const restAlignment = b.shape === "coin" ? 0.985 : 0.86;
-        const settleAlignment = b.shape === "coin" ? 0.995 : 0.965;
-        // 判斷「有沒有安靜地躺在某一面」先看接觸、水平滑動、角速度
-        // 與頂面法線；事件目標只會在低能量接觸尾段透過阻尼收斂，
-        // 不在空中改寫投擲，也不在結算瞬間硬擺角度。
-        // A coin that is merely leaning on its rim is still unstable.  Keep
-        // the third-face result only for an almost exact edge balance; the
-        // normal tilted cases must continue to tip until heads or tails is
-        // actually supported by the tabletop.
-        const edgeRest = b.shape === "coin" && faceState.edge && faceState.alignment < 0.06;
-        const supportedBySurface = touchingFloor || Boolean(b.supportContact);
-        if (supportedBySurface && horizontalSpeed < 28 && angularSpeed < 1.4 && (faceState.alignment > restAlignment || edgeRest)) {{
-          b.restTime += dt;
-        }} else {{
-          b.restTime = 0;
-        }}
-
-        // Rounded physical dice do not remain perfectly wedged between sharp
-        // mathematical corners.  If a low-energy die is suspended above the
-        // table without a near-horizontal support manifold, model that small
-        // geometric imperfection as a downhill rolling impulse.  Its direction
-        // comes only from the current quaternion; it neither selects a face nor
-        // edits the quaternion, and normal face-on-face stacks are untouched.
-        const unstableSuspendedGeometry = !touchingFloor && floorContact.minY > 0.5 &&
-          faceState.alignment < settleAlignment;
-        if (unstableSuspendedGeometry) {{
-          b.unstableContactTime += dt;
-        }} else {{
-          b.unstableContactTime = 0;
-        }}
-        if (b.shape === "box" && b.unstableContactTime > 0.22 && faceState.normal &&
-            Math.abs(b.vy) < 50 && angularSpeed < 1.2) {{
-          // Pick the least obstructed horizontal downhill path around nearby
-          // dice.  This approximates a rounded corner deflecting out of a
-          // multi-die pinch instead of repeatedly resolving into both boxes.
-          let escapeX = -faceState.normal.x;
-          let escapeZ = -faceState.normal.z;
-          let bestClearance = -Infinity;
-          for (let directionIndex = 0; directionIndex < 8; directionIndex++) {{
-            const angle = directionIndex * Math.PI / 4;
-            const candidateX = Math.cos(angle);
-            const candidateZ = Math.sin(angle);
-            let clearance = Infinity;
-            for (const other of this.bodies) {{
-              if (other === b) continue;
-              clearance = Math.min(clearance, Math.hypot(
-                b.x + candidateX * 54 - other.x,
-                b.z + candidateZ * 54 - other.z
-              ));
-            }}
-            if (clearance > bestClearance) {{
-              bestClearance = clearance;
-              escapeX = candidateX;
-              escapeZ = candidateZ;
-            }}
-          }}
-          const escapeLength = Math.hypot(escapeX, escapeZ);
-          if (escapeLength > 1e-5) {{
-            escapeX /= escapeLength;
-            escapeZ /= escapeLength;
-            b.vx += escapeX * 600 * dt;
-            b.vz += escapeZ * 600 * dt;
-            angular.x += escapeZ * 12 * dt;
-            angular.z -= escapeX * 12 * dt;
-          }}
-        }}
-
-        if (touchingFloor) {{
-          // 真正的桌面接觸會有滾動阻力；越接近平面，耗能越明顯，
-          // 但不改變姿態，讓最後面向仍然由碰撞結果自然決定。
-          // Do not overdamp an edge/corner contact.  That creates a false
-          // static equilibrium where gravity torque and damping cancel while
-          // the body is visibly tilted.  Strong braking starts only once a
-          // broad face is already close to the tabletop.
-          const isCoin = b.shape === "coin";
-          const brakeStart = isCoin ? 0.60 : 0.86;
-          const contactLevel = Math.max(0, Math.min(1,
-            (faceState.alignment - brakeStart) / Math.max(0.001, 1 - brakeStart)
-          ));
-          const surfaceBrake = isCoin
-            ? 0.92 - contactLevel * 0.14
-            : 0.975 - contactLevel * 0.195;
-          const contactSpinBrake = isCoin
-            ? 0.94 - contactLevel * 0.16
-            : 0.992 - contactLevel * 0.212;
-          b.vx *= Math.pow(surfaceBrake, dt * 60);
-          b.vz *= Math.pow(surfaceBrake, dt * 60);
-          angular.x *= Math.pow(contactSpinBrake, dt * 60);
-          angular.y *= Math.pow(contactSpinBrake, dt * 60);
-          angular.z *= Math.pow(contactSpinBrake, dt * 60);
-        }}
-        if (b.supportContact && !touchingFloor) {{
-          const broadSupport = faceState.alignment > settleAlignment;
-          const supportLinearBrake = broadSupport ? 0.88 : 0.97;
-          const supportSpinBrake = broadSupport ? 0.90 : 0.992;
-          b.vx *= Math.pow(supportLinearBrake, dt * 60);
-          b.vz *= Math.pow(supportLinearBrake, dt * 60);
-          angular.x *= Math.pow(supportSpinBrake, dt * 60);
-          angular.y *= Math.pow(supportSpinBrake, dt * 60);
-          angular.z *= Math.pow(supportSpinBrake, dt * 60);
-        }}
-
-        if (b.restTime > 0.18) {{
-          // 接觸面的動摩擦在 solver 中逐步消耗平移與角動能；這裡只
-          // 加強已經接近靜止的尾段煞車，完全不改變骰子的姿態。
-          const groundBrake = Math.pow(0.62, dt * 60);
-          const spinBrake = Math.pow(0.56, dt * 60);
-          b.vx *= groundBrake;
-          b.vz *= groundBrake;
-          angular.x *= spinBrake;
-          angular.y *= spinBrake;
-          angular.z *= spinBrake;
-        }}
-
-        if (targetLocalNormal && (touchingFloor || Boolean(b.supportContact)) &&
-            Math.abs(b.vy) < 42 && Math.hypot(b.vx, b.vz) < 34 &&
-            Math.hypot(angular.x, angular.y, angular.z) < 1.8 &&
-            targetAlignment < settleAlignment) {{
-          // Once motion is genuinely low-energy, close the remaining contact
-          // error with a critically damped incremental orientation step. It
-          // is intentionally gradual (never a last-frame snap), and the
-          // support point is re-evaluated immediately so a corrected die
-          // remains seated on the same horizontal plane.
-          const targetQuaternion = diceQuatAlignLocalNormal(b.q, targetLocalNormal);
-          const correctionAmount = 1 - Math.exp(-8.5 * dt);
-          b.q = diceQuatSlerp(b.q, targetQuaternion, correctionAmount);
-          const correctedContact = diceFloorContact(b);
-          if (correctedContact.minY < 0) b.y -= correctedContact.minY;
-          b.vy = 0;
-          angular.x *= 0.72;
-          angular.y *= 0.72;
-          angular.z *= 0.72;
-          faceState = b.shape === "coin"
-            ? coinFaceUpFromQuaternion(b.q)
-            : diceFaceUpFromQuaternion(b.q);
-          floorContact = correctedContact;
-          supportY = correctedContact.minY;
-        }}
-
-        const cooledHorizontalSpeed = Math.hypot(b.vx, b.vz);
-        const cooledAngularSpeed = Math.hypot(angular.x, angular.y, angular.z);
-        let cooledTiltSpeed = cooledAngularSpeed;
-        if (b.shape === "coin") {{
-          const faceAxis = diceRotateVector(b.q, {{ x: 0, y: 0, z: 1 }});
-          const axialSpeed = diceDot(angular, faceAxis);
-          cooledTiltSpeed = Math.sqrt(Math.max(0, cooledAngularSpeed * cooledAngularSpeed - axialSpeed * axialSpeed));
-        }}
-        const edgeSettled = b.shape === "coin" && faceState.edge && faceState.alignment < 0.06;
-        const targetSettled = targetNormal
-          ? targetAlignment > settleAlignment
-          : true;
-        const faceSettled = faceState.alignment > settleAlignment && targetSettled;
-        const angularSettled = b.shape === "coin"
-          ? cooledTiltSpeed < 0.50 && cooledAngularSpeed < 1.0
-          : cooledAngularSpeed < 0.50;
-        if (b.restTime > (edgeSettled ? 0.52 : 0.30) && cooledHorizontalSpeed < 9 && angularSettled && (faceSettled || edgeSettled)) {{
-          // 自然姿態已經達到平面接觸，讀取頂面並進入睡眠；只清零
-          // 速度，不改 quaternion，因此不會出現最後硬擺到定位點。
-          b.vx = 0;
-          b.vy = 0;
-          b.vz = 0;
-          angular.x = 0;
-          angular.y = 0;
-          angular.z = 0;
-          b.finalFace = faceState.value;
-          b.settled = true;
-          if (b.onSettle) b.onSettle(faceState.value);
-        }}
-      }}
-
-      resolveBoxPair(b1, b2) {{
-        if (!b1.q || !b2.q) return;
-        const dx = b2.x - b1.x;
-        const dy = b2.y - b1.y;
-        const dz = b2.z - b1.z;
-        const distSq = dx * dx + dy * dy + dz * dz;
-        const broadRadius = (b1.boundingRadius || b1.radius) + (b2.boundingRadius || b2.radius);
-        if (distSq >= broadRadius * broadRadius) return;
-
-        const contact = diceBoxBoxContact(b1, b2);
-        if (!contact) return;
-        const normal = contact.normal;
-        let pointA = diceSupportPoint(b1, normal);
-        let pointB = diceSupportPoint(b2, {{
-          x: -normal.x,
-          y: -normal.y,
-          z: -normal.z
-        }});
-        const penetration = contact.penetration;
-
-        const sleepingA = Boolean(b1.settled);
-        const sleepingB = Boolean(b2.settled);
-        // 兩顆都已停穩時不再修正近似 OBB 的微小重疊，否則每個
-        // fixed step 都會把它們推開，畫面就會出現落地後的抖動。
-        if (sleepingA && sleepingB) return;
-        const invMassA = sleepingA ? 0 : 1 / Math.max(0.001, b1.mass);
-        const invMassB = sleepingB ? 0 : 1 / Math.max(0.001, b2.mass);
-        const invMassSum = invMassA + invMassB;
-        if (invMassSum <= 0) return;
-        const correction = penetration * 0.82 / invMassSum;
-        b1.x -= normal.x * correction * invMassA;
-        b1.y -= normal.y * correction * invMassA;
-        b1.z -= normal.z * correction * invMassA;
-        b2.x += normal.x * correction * invMassB;
-        b2.y += normal.y * correction * invMassB;
-        b2.z += normal.z * correction * invMassB;
-
-        pointA = diceSupportPoint(b1, normal);
-        pointB = diceSupportPoint(b2, {{
-          x: -normal.x,
-          y: -normal.y,
-          z: -normal.z
-        }});
-        const contactPoint = {{
-          x: (pointA.x + pointB.x) * 0.5,
-          y: (pointA.y + pointB.y) * 0.5,
-          z: (pointA.z + pointB.z) * 0.5
-        }};
-        // Only a nearly upward manifold is structural support.  Treating a
-        // steep edge/side contact as a shelf lets friction hold the upper die
-        // at an implausible angle instead of letting it slide to the table.
-        if (normal.y > 0.97 && !b2.settled) {{
-          if (!b2.supportContact || normal.y > b2.supportContact.normalY) {{
-            // For a die supported from below, the useful torque arm is the
-            // lowest contact patch on that die.  The old midpoint between two
-            // OBB support corners could pass almost through its centre and
-            // leave a tilted upper die balanced forever.  Reuse the same
-            // averaged bottom patch as the tabletop solver; only its height
-            // comes from the die/die contact manifold.
-            const supportedPatch = diceFloorContact(b2).point;
-            b2.supportContact = {{
-              point: {{ x: supportedPatch.x, y: contactPoint.y, z: supportedPatch.z }},
-              normalY: normal.y
-            }};
-          }}
-        }} else if (normal.y < -0.97 && !b1.settled) {{
-          if (!b1.supportContact || -normal.y > b1.supportContact.normalY) {{
-            const supportedPatch = diceFloorContact(b1).point;
-            b1.supportContact = {{
-              point: {{ x: supportedPatch.x, y: contactPoint.y, z: supportedPatch.z }},
-              normalY: -normal.y
-            }};
-          }}
-        }}
-        const va = diceVelocityAtPoint(b1, contactPoint);
-        const vb = diceVelocityAtPoint(b2, contactPoint);
-        const relative = {{ x: vb.x - va.x, y: vb.y - va.y, z: vb.z - va.z }};
-        const velocityAlongNormal = diceDot(relative, normal);
-        if (velocityAlongNormal >= 0) return;
-
-        // 已停穩的骰子只會被明顯撞擊喚醒；一般的接觸修正把它當成
-        // 靜態物體，讓另一顆骰子自己吸收剩餘速度。
-        const impactSpeed = -velocityAlongNormal;
-        const wakeSleepingBody = impactSpeed > 85;
-        if (sleepingA && wakeSleepingBody) b1.settled = false;
-        if (sleepingB && wakeSleepingBody) b2.settled = false;
-        const activeInvMassA = b1.settled ? 0 : 1 / Math.max(0.001, b1.mass);
-        const activeInvMassB = b2.settled ? 0 : 1 / Math.max(0.001, b2.mass);
-        if (activeInvMassA + activeInvMassB <= 0) return;
-
-        const ra = {{
-          x: contactPoint.x - b1.x,
-          y: contactPoint.y - b1.y,
-          z: contactPoint.z - b1.z
-        }};
-        const rb = {{
-          x: contactPoint.x - b2.x,
-          y: contactPoint.y - b2.y,
-          z: contactPoint.z - b2.z
-        }};
-        const denominator =
-          diceImpulseDenominator(b1, ra, normal) +
-          diceImpulseDenominator(b2, rb, normal);
-        const pairRestitution = impactSpeed < 48 ? 0 : Math.min(b1.restitution, b2.restitution);
-        const impulseMagnitude =
-          -(1 + pairRestitution) *
-          velocityAlongNormal / denominator;
-        const normalImpulse = {{
-          x: normal.x * impulseMagnitude,
-          y: normal.y * impulseMagnitude,
-          z: normal.z * impulseMagnitude
-        }};
-        diceApplyImpulse(b1, {{
-          x: -normalImpulse.x,
-          y: -normalImpulse.y,
-          z: -normalImpulse.z
-        }}, contactPoint);
-        diceApplyImpulse(b2, normalImpulse, contactPoint);
-        const postA = diceVelocityAtPoint(b1, contactPoint);
-        const postB = diceVelocityAtPoint(b2, contactPoint);
-        const postRelative = {{
-          x: postB.x - postA.x,
-          y: postB.y - postA.y,
-          z: postB.z - postA.z
-        }};
-        const normalVelocity = diceDot(postRelative, normal);
-        const tangentVelocity = {{
-          x: postRelative.x - normal.x * normalVelocity,
-          y: postRelative.y - normal.y * normalVelocity,
-          z: postRelative.z - normal.z * normalVelocity
-        }};
-        const tangentSpeed = Math.hypot(tangentVelocity.x, tangentVelocity.y, tangentVelocity.z);
-        if (tangentSpeed > 0.01) {{
-          const tangent = {{
-            x: tangentVelocity.x / tangentSpeed,
-            y: tangentVelocity.y / tangentSpeed,
-            z: tangentVelocity.z / tangentSpeed
-          }};
-          const tangentDenominator =
-            diceImpulseDenominator(b1, ra, tangent) +
-            diceImpulseDenominator(b2, rb, tangent);
-          const requested = -tangentSpeed / tangentDenominator;
-          const supportSlope = Math.abs(normal.y);
-          const pairFriction = supportSlope > 0.97 ? Math.min(b1.friction, b2.friction) : 0;
-          const maxFriction = impulseMagnitude * pairFriction;
-          const tangentMagnitude = Math.max(-maxFriction, Math.min(maxFriction, requested));
-          const tangentImpulse = {{
-            x: tangent.x * tangentMagnitude,
-            y: tangent.y * tangentMagnitude,
-            z: tangent.z * tangentMagnitude
-          }};
-          diceApplyImpulse(b1, {{
-            x: -tangentImpulse.x,
-            y: -tangentImpulse.y,
-            z: -tangentImpulse.z
-          }}, contactPoint);
-          diceApplyImpulse(b2, tangentImpulse, contactPoint);
-        }}
-
-        if (Math.abs(velocityAlongNormal) > 45) {{
-          sound.playFile("/assets/sound/casino/chips-collide-1.ogg", () => sound.playWoodClack(0.7));
-        }}
-      }}
-
-      step(dt) {{
-        // Pair contacts discovered in the previous fixed step are consumed
-        // while integrating the bodies below.  They are cleared only after
-        // that integration, before this step's pair solver writes fresh
-        // contacts; clearing them here would make support never reach the
-        // body that needs the restoring torque.
-        for (let i = 0; i < this.bodies.length; i++) {{
-          const b = this.bodies[i];
-          if (b.settled) continue;
-          if (b.shape === "box" || b.shape === "coin") {{
-            this.stepBoxBody(b, dt);
-            continue;
-          }}
-
-          b.vy += this.gravity * dt;
-          b.vx *= Math.pow(b.airDrag, dt * 60);
-          b.vy *= Math.pow(b.airDrag, dt * 60);
-          b.vz *= Math.pow(b.airDrag, dt * 60);
-          b.wx *= Math.pow(b.rotDamping, dt * 60);
-          b.wy *= Math.pow(b.rotDamping, dt * 60);
-          b.wz *= Math.pow(b.rotDamping, dt * 60);
-
-          b.x += b.vx * dt;
-          b.y += b.vy * dt;
-          b.z += b.vz * dt;
-          b.rx += b.wx * dt;
-          b.ry += b.wy * dt;
-          b.rz += b.wz * dt;
-
-          if (b.y <= this.planeY) {{
-            b.y = this.planeY;
-            const impactSpeed = Math.abs(b.vy);
-            if (impactSpeed > 45) {{
-              b.vy = -b.vy * b.restitution;
-              b.vx *= b.friction;
-              b.vz *= b.friction;
-
-              const kick = Math.min(1600, impactSpeed * 2.8);
-              b.wx = b.wx * 0.45 + (Math.random() - 0.5) * kick;
-              b.wy = b.wy * 0.55 + (Math.random() - 0.5) * kick * 0.7;
-              b.wz = b.wz * 0.45 + (Math.random() - 0.5) * kick;
-
-              if (b.onBounce) b.onBounce(impactSpeed);
-            }} else {{
-              b.vy = 0;
-              const grip = Math.max(0.58, Math.min(0.94, b.surfaceFriction));
-              const linearDamp = Math.pow(1 - grip * 0.10, dt * 60);
-              const angularDamp = Math.pow(1 - grip * 0.14, dt * 60);
-              b.vx *= linearDamp;
-              b.vz *= linearDamp;
-              b.wx *= angularDamp;
-              b.wy *= angularDamp;
-              b.wz *= angularDamp;
-
-              // 地面滾動阻力把水平速度逐步轉成角速度，避免骰子像滑鼠游標一樣平移停住。
-              b.wx += b.vz * grip * 0.012 * dt;
-              b.wz -= b.vx * grip * 0.012 * dt;
-
-              const vSq = b.vx * b.vx + b.vz * b.vz;
-              const wSq = b.wx * b.wx + b.wy * b.wy + b.wz * b.wz;
-              if (vSq < 50 && wSq < 500) {{
-                // Legacy spherical bodies may still be used by non-throwing
-                // callers.  They can sleep on low velocity, but never rotate
-                // toward an event-provided result during settlement.
-                if (vSq < 8 && wSq < 80) b.settled = true;
-              }}
-            }}
-          }}
-
-          if (b.x < this.bounds.minX) {{
-            b.x = this.bounds.minX;
-            b.vx = -b.vx * 0.65;
-            b.wz += (Math.random() - 0.5) * 500;
-            if (b.onWallHit) b.onWallHit();
-          }} else if (b.x > this.bounds.maxX) {{
-            b.x = this.bounds.maxX;
-            b.vx = -b.vx * 0.65;
-            b.wz += (Math.random() - 0.5) * 500;
-            if (b.onWallHit) b.onWallHit();
-          }}
-
-          if (b.z < this.bounds.minZ) {{
-            b.z = this.bounds.minZ;
-            b.vz = -b.vz * 0.65;
-            b.wx += (Math.random() - 0.5) * 500;
-            if (b.onWallHit) b.onWallHit();
-          }} else if (b.z > this.bounds.maxZ) {{
-            b.z = this.bounds.maxZ;
-            b.vz = -b.vz * 0.65;
-            b.wx += (Math.random() - 0.5) * 500;
-            if (b.onWallHit) b.onWallHit();
-          }}
-        }}
-
-        for (const body of this.bodies) body.supportContact = null;
-        for (let i = 0; i < this.bodies.length; i++) {{
-          for (let j = i + 1; j < this.bodies.length; j++) {{
-            const b1 = this.bodies[i];
-            const b2 = this.bodies[j];
-            if (b1.shape === "box" && b2.shape === "box") {{
-              this.resolveBoxPair(b1, b2);
-              continue;
-            }}
-            const dx = b2.x - b1.x;
-            const dy = b2.y - b1.y;
-            const dz = b2.z - b1.z;
-            const distSq = dx * dx + dy * dy + dz * dz;
-            const minDist = (b1.boundingRadius || b1.radius) + (b2.boundingRadius || b2.radius);
-
-            if (distSq < minDist * minDist && distSq > 0.001) {{
-              const dist = Math.sqrt(distSq);
-              const nx = dx / dist;
-              const ny = dy / dist;
-              const nz = dz / dist;
-
-              const overlap = (minDist - dist) * 0.5;
-              b1.x -= nx * overlap;
-              b1.y -= ny * overlap;
-              b1.z -= nz * overlap;
-              b2.x += nx * overlap;
-              b2.y += ny * overlap;
-              b2.z += nz * overlap;
-
-              const rvx = b2.vx - b1.vx;
-              const rvy = b2.vy - b1.vy;
-              const rvz = b2.vz - b1.vz;
-              const velAlongNormal = rvx * nx + rvy * ny + rvz * nz;
-
-              if (velAlongNormal < 0) {{
-                const rest = Math.min(b1.restitution, b2.restitution);
-                const invMass1 = 1 / Math.max(0.001, b1.mass);
-                const invMass2 = 1 / Math.max(0.001, b2.mass);
-                const invMassSum = invMass1 + invMass2;
-                const impulse = -(1 + rest) * velAlongNormal / invMassSum;
-
-                b1.vx -= impulse * nx * invMass1;
-                b1.vy -= impulse * ny * invMass1;
-                b1.vz -= impulse * nz * invMass1;
-                b2.vx += impulse * nx * invMass2;
-                b2.vy += impulse * ny * invMass2;
-                b2.vz += impulse * nz * invMass2;
-
-                // 庫倫式切向摩擦：碰撞不只交換法向速度，也會消耗擦過彼此的速度。
-                let tx = -nz;
-                let ty = 0;
-                let tz = nx;
-                const tangentLen = Math.hypot(tx, ty, tz);
-                if (tangentLen < 0.0001) {{
-                  tx = 1;
-                  ty = 0;
-                  tz = 0;
-                }} else {{
-                  tx /= tangentLen;
-                  ty /= tangentLen;
-                  tz /= tangentLen;
-                }}
-                const tangentVelocity = rvx * tx + rvy * ty + rvz * tz;
-                const frictionImpulse = Math.max(
-                  -impulse * 0.72,
-                  Math.min(impulse * 0.72, -tangentVelocity / invMassSum)
-                );
-                b1.vx -= frictionImpulse * tx * invMass1;
-                b1.vy -= frictionImpulse * ty * invMass1;
-                b1.vz -= frictionImpulse * tz * invMass1;
-                b2.vx += frictionImpulse * tx * invMass2;
-                b2.vy += frictionImpulse * ty * invMass2;
-                b2.vz += frictionImpulse * tz * invMass2;
-
-                b1.wx += frictionImpulse * tz * 0.9;
-                b1.wz -= frictionImpulse * tx * 0.9;
-                b2.wx -= frictionImpulse * tz * 0.9;
-                b2.wz += frictionImpulse * tx * 0.9;
-
-                if (Math.abs(velAlongNormal) > 40) {{
-                  sound.playFile("/assets/sound/casino/chips-collide-1.ogg", () => sound.playWoodClack(0.7));
-                }}
-              }}
-            }}
-          }}
-        }}
-        // Sequential impulse solvers need more than one pass for a three-body
-        // contact graph.  Two quiet correction passes prevent the last pair
-        // from undoing the first pair's separation and leaving a die pinched
-        // between neighbours until the watchdog.  Single dice/coin paths pay
-        // no extra work.
-        for (let solverPass = 0; solverPass < 2; solverPass++) {{
-          for (let i = 0; i < this.bodies.length; i++) {{
-            for (let j = i + 1; j < this.bodies.length; j++) {{
-              const b1 = this.bodies[i];
-              const b2 = this.bodies[j];
-              if (b1.shape === "box" && b2.shape === "box") this.resolveBoxPair(b1, b2);
-            }}
-          }}
-        }}
-      }}
-
-      render() {{
-        const deg2rad = Math.PI / 180;
-        const scaleFactor = 0.052;
-        const hasWebGL = Boolean(this.webglEngine && this.webglEngine.isSupported);
-        const planeY = this.planeY;
-
-        for (let i = 0; i < this.bodies.length; i++) {{
-          const b = this.bodies[i];
-          const isOrientedBody = (b.shape === "box" || b.shape === "coin") && b.q;
-          const bodyEuler = isOrientedBody ? diceQuatToEulerXYZ(b.q) : null;
-          if (b.threeMesh) {{
-            const halfSize = b.threeMesh.userData && b.threeMesh.userData.halfSize
-              ? b.threeMesh.userData.halfSize
-              : ((b.threeMesh.geometry && b.threeMesh.geometry.parameters) ? (b.threeMesh.geometry.parameters.height / 2) : 1.4);
-            const planeRenderY = this.webglEngine
-              ? this.webglEngine.planeY * scaleFactor
-              : 0;
-            const bodyY = (b.y - planeY) * scaleFactor + planeRenderY;
-            // The solver's support point, not the axis-aligned half-size, is
-            // the source of truth for contact. Clamping a tilted die's
-            // centre to halfSize lifts a legitimate corner/edge contact and
-            // makes the die visibly hover before it settles.
-            b.threeMesh.position.set(b.x * scaleFactor, bodyY, b.z * scaleFactor);
-            if (isOrientedBody) {{
-              b.threeMesh.quaternion.set(b.q.x, b.q.y, b.q.z, b.q.w);
-            }} else {{
-              b.threeMesh.rotation.set(-b.rx * deg2rad, b.ry * deg2rad, b.rz * deg2rad);
-            }}
-          }}
-          if (b.element) {{
-            if (isOrientedBody) {{
-              const cameraSin = Math.sin(64 * DICE_DEG2RAD);
-              const cameraCos = Math.cos(64 * DICE_DEG2RAD);
-              const height = b.y - planeY;
-              const cssY = -cameraSin * height + cameraCos * b.z;
-              const cssZ = cameraCos * height + cameraSin * b.z;
-              b.element.style.transform = `translate3d(${{b.x}}px, ${{cssY}}px, ${{cssZ}}px) ${{diceQuatToCssMatrix3d(b.q)}}`;
-            }} else {{
-              b.element.style.transform = `translate3d(${{b.x}}px, ${{-(b.y - planeY)}}px, ${{b.z}}px) rotateX(${{b.rx}}deg) rotateY(${{b.ry}}deg) rotateZ(${{b.rz}}deg)`;
-            }}
-          }}
-          if (b.shadowElement) {{
-            const heightAbovePlane = Math.max(0, b.y - planeY);
-            const scale = Math.max(0.2, 1 - heightAbovePlane / 420);
-            const op = Math.max(0.04, b.shadowOpacity - heightAbovePlane / 360);
-            const cameraSin = Math.sin(64 * DICE_DEG2RAD);
-            const cameraCos = Math.cos(64 * DICE_DEG2RAD);
-            b.shadowElement.style.transform = `translate3d(${{b.x}}px, ${{cameraCos * b.z}}px, ${{cameraSin * b.z}}px) scale(${{scale}})`;
-            b.shadowElement.style.opacity = op;
-          }}
-        }}
-
-        if (hasWebGL) {{
-          this.webglEngine.render();
-        }}
-      }}
     }}
 
     function create3DDieDOM(size = 68) {{
@@ -6301,12 +4902,14 @@ def render_game_overlay_html(
         return f;
       }};
 
+      // Keep CSS local face normals identical to Cannon and Three.js:
+      // +Z=1, +X=2, -Z=3, -X=4, -Y=5, +Y=6.
       cube.appendChild(makeFace(1, "face-layout-1", '<div class="pip pip-red pip-center-big"></div>', `rotateY(0deg) translateZ(${{half}}px)`));
-      cube.appendChild(makeFace(6, "face-layout-6", '<div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div>', `rotateY(180deg) translateZ(${{half}}px)`));
-      cube.appendChild(makeFace(2, "face-layout-2", '<div class="pip"></div><div class="pip"></div>', `rotateX(90deg) translateZ(${{half}}px)`));
-      cube.appendChild(makeFace(5, "face-layout-5", '<div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div>', `rotateX(-90deg) translateZ(${{half}}px)`));
-      cube.appendChild(makeFace(3, "face-layout-3", '<div class="pip"></div><div class="pip"></div><div class="pip"></div>', `rotateY(90deg) translateZ(${{half}}px)`));
+      cube.appendChild(makeFace(2, "face-layout-2", '<div class="pip"></div><div class="pip"></div>', `rotateY(90deg) translateZ(${{half}}px)`));
+      cube.appendChild(makeFace(3, "face-layout-3", '<div class="pip"></div><div class="pip"></div><div class="pip"></div>', `rotateY(180deg) translateZ(${{half}}px)`));
       cube.appendChild(makeFace(4, "face-layout-4", '<div class="pip pip-red"></div><div class="pip pip-red"></div><div class="pip pip-red"></div><div class="pip pip-red"></div>', `rotateY(-90deg) translateZ(${{half}}px)`));
+      cube.appendChild(makeFace(5, "face-layout-5", '<div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div>', `rotateX(90deg) translateZ(${{half}}px)`));
+      cube.appendChild(makeFace(6, "face-layout-6", '<div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div>', `rotateX(-90deg) translateZ(${{half}}px)`));
 
       wrap.appendChild(cube);
       return {{ wrap, shadow, cube }};
@@ -6351,7 +4954,16 @@ def render_game_overlay_html(
       }}
 
       if (coinPhysicsWorld) coinPhysicsWorld.stop();
-      coinPhysicsWorld = new StreamPhysicsWorld(arena, webglEngine, DICE_REFERENCE_DEFAULTS);
+      const coinPhysicsInput = data.physics && typeof data.physics === "object" ? data.physics : {{}};
+      const coinPhysicsSeed = data.physics_seed || coinPhysicsInput.seed || null;
+      const coinRandom = coinPhysicsSeed
+        ? seededRandom(hashSeed(`${{coinPhysicsSeed}}:coin-launch`))
+        : Math.random;
+      coinPhysicsWorld = new StreamPhysicsWorld(arena, webglEngine, {{
+        ...DICE_REFERENCE_DEFAULTS,
+        resultPolicy: coinPhysicsInput.resultPolicy || "event-replay",
+        physicsSeed: coinPhysicsSeed
+      }});
       coinPhysicsWorld.bounds = {{ minX: -190, maxX: 190, minZ: -90, maxZ: 90 }};
 
       let bouncePlayed = false;
@@ -6371,26 +4983,26 @@ def render_game_overlay_html(
         radius: 58,
         halfThickness: 7,
         mass: 1.0,
-        restitution: 0.42,
-        friction: 0.84,
-        surfaceFriction: 0.90,
+        restitution: 0.32,
+        friction: 0.68,
+        surfaceFriction: 0.64,
         airDrag: 0.997,
-        rotDamping: 0.987,
+        rotDamping: 0.970,
         x: -38,
         // Keep the full first toss inside the shared camera frustum.  At 250px
         // the coin entered above the viewport in both WebGL and CSS fallback,
         // making the opening frame look like a clipped asset instead of a toss.
         y: 115,
         z: -20,
-        vx: 118 + Math.random() * 58,
-        vy: 36 + Math.random() * 38,
-        vz: 34 + (Math.random() - 0.5) * 34,
-        rx: 18 + Math.random() * 34,
-        ry: Math.random() * 360,
-        rz: 12 + Math.random() * 30,
-        wx: 1100 + Math.random() * 560,
-        wy: (Math.random() - 0.5) * 900,
-        wz: 700 + Math.random() * 500,
+        vx: 118 + coinRandom() * 58,
+        vy: 36 + coinRandom() * 38,
+        vz: 34 + (coinRandom() - 0.5) * 34,
+        rx: 18 + coinRandom() * 34,
+        ry: coinRandom() * 360,
+        rz: 12 + coinRandom() * 30,
+        wx: 1100 + coinRandom() * 560,
+        wy: (coinRandom() - 0.5) * 900,
+        wz: 700 + coinRandom() * 500,
         targetCoinSide: requestedSide,
         shadowOpacity: 0.82,
         onBounce: (impactSpeed) => {{
@@ -6411,12 +5023,10 @@ def render_game_overlay_html(
       body.onSettle = (physicalSide) => {{
         if (resultAnnounced) return;
         resultAnnounced = true;
-        const eventSide = requestedSide || physicalSide;
-        // The physics pose is guided toward the requested side; use the same
-        // resolved side for the CSS fallback so its face artwork cannot drift
-        // away from the WebGL mesh or the result bubble.
-        if (disc) disc.dataset.face = eventSide;
-        bubble.innerText = `@${{data.user_name || "觀眾"}} 拋出了【${{eventSide}}】！`;
+        // The sleeping Cannon body's quaternion is the only visual result.
+        // event-replay constrains the launch seed, never the landing pose.
+        if (disc) disc.dataset.face = physicalSide;
+        bubble.innerText = `@${{data.user_name || "觀眾"}} 拋出了【${{physicalSide}}】！`;
         sound.playFile("/assets/sound/casino/chips-collide-1.ogg", () => sound.playCoinShower());
         spawnVFX("gold", 45);
       }};
@@ -6467,6 +5077,8 @@ def render_game_overlay_html(
       }};
       const physicsConfig = {{
         ...DICE_REFERENCE_DEFAULTS,
+        resultPolicy: String(physicsInput.resultPolicy || "event-replay"),
+        physicsSeed: data.physics_seed || physicsInput.seed || null,
         initialVelocity: finiteOr(physicsInput.initialVelocity, DICE_REFERENCE_DEFAULTS.initialVelocity),
         throwDistance: finiteOr(physicsInput.throwDistance, DICE_REFERENCE_DEFAULTS.throwDistance),
         gravity: finiteOr(physicsInput.gravity, DICE_REFERENCE_DEFAULTS.gravity),
@@ -6479,6 +5091,9 @@ def render_game_overlay_html(
         spinRotation: finiteOr(physicsInput.spinRotation, DICE_REFERENCE_DEFAULTS.spinRotation),
         shadowOpacity: finiteOr(physicsInput.shadowOpacity, DICE_REFERENCE_DEFAULTS.shadowOpacity)
       }};
+      const diceRandom = physicsConfig.physicsSeed
+        ? seededRandom(hashSeed(`${{physicsConfig.physicsSeed}}:dice-launch`))
+        : Math.random;
       if (rolls.length === 0) {{
         if (total <= 6) {{
           rolls = [total];
@@ -6525,28 +5140,23 @@ def render_game_overlay_html(
 
       if (dicePhysicsWorld) dicePhysicsWorld.stop();
       dicePhysicsWorld = new StreamPhysicsWorld(arena, webglEngine, physicsConfig);
+      // The reference throw enters from an edge. Keep every spawn center on
+      // the inside of a tall physical wall while staying within the rendered
+      // tabletop footprint.
       dicePhysicsWorld.bounds = {{ minX: -190, maxX: 190, minZ: -90, maxZ: 90 }};
 
       const numDice = rolls.length;
       let physicalFanfarePlayed = false;
-      const eventRolls = rolls.slice();
-      const eventTotal = Number.isFinite(Number(data.total))
-        ? Number(data.total)
-        : eventRolls.reduce((sum, value) => sum + value, 0);
-      const eventDetail = typeof data.detail === "string" && data.detail.trim()
-        ? data.detail.trim()
-        : (eventRolls.length === 1
-          ? `1d6 = ${{eventRolls[0]}}`
-          : `${{eventRolls.length}}d6 (${{eventRolls.join(" + ")}}) = ${{eventTotal}}`);
       const announceSettledResult = (settledRolls = null) => {{
-        // The event is the settlement authority.  The rigid bodies still land
-        // naturally, but the overlay must never contradict the chat reply or
-        // point ledger just because the visual physics took another face.
         const finalRolls = settledRolls || dicePhysicsWorld.bodies.map(body => body.finalFace);
         if (finalRolls.length !== numDice || finalRolls.some(value => !Number.isInteger(value))) return;
-        bubble.innerText = `@${{data.user_name || "觀眾"}} 擲出了 ${{eventDetail}}！`;
+        const finalTotal = finalRolls.reduce((sum, value) => sum + value, 0);
+        const finalDetail = finalRolls.length === 1
+          ? `1d6 = ${{finalRolls[0]}}`
+          : `${{finalRolls.length}}d6 (${{finalRolls.join(" + ")}}) = ${{finalTotal}}`;
+        bubble.innerText = `@${{data.user_name || "觀眾"}} 擲出了 ${{finalDetail}}！`;
         if (!physicalFanfarePlayed &&
-            (eventTotal === 6 || eventTotal === 12 || eventRolls.every(value => value === eventRolls[0]))) {{
+            (finalTotal === 6 || finalTotal === 12 || finalRolls.every(value => value === finalRolls[0]))) {{
           physicalFanfarePlayed = true;
           sound.playFanfare();
           spawnVFX("gold", 80);
@@ -6598,24 +5208,36 @@ def render_game_overlay_html(
         // 參考專案的 distance 是舞台像素；WebGL 舞台較小，映射成可見的入場距離，
         // 避免骰子一開始被物理邊界立即彈回。
         const entryDistance = Math.max(70, Math.min(130, physicsConfig.throwDistance * 0.25));
-        const spawnX = startX + entryVector.x * entryDistance;
-        const spawnZ = startZ + entryVector.z * entryDistance + (Math.random() - 0.5) * 12;
-        const moveDuration = physicsConfig.moveDuration.min + Math.random() * Math.max(0, physicsConfig.moveDuration.max - physicsConfig.moveDuration.min);
+        const rawSpawnX = startX + entryVector.x * entryDistance;
+        const rawSpawnZ = startZ + entryVector.z * entryDistance + (diceRandom() - 0.5) * 12;
+        // A Cannon box must start fully inside the wall, not merely with its
+        // center inside the bounds.  Keep extra room for seeded preflight
+        // jitter so the solver never ejects an initially overlapping die.
+        const spawnClearance = 50;
+        const spawnX = Math.max(
+          dicePhysicsWorld.bounds.minX + spawnClearance,
+          Math.min(dicePhysicsWorld.bounds.maxX - spawnClearance, rawSpawnX)
+        );
+        const spawnZ = Math.max(
+          dicePhysicsWorld.bounds.minZ + spawnClearance,
+          Math.min(dicePhysicsWorld.bounds.maxZ - spawnClearance, rawSpawnZ)
+        );
+        const moveDuration = physicsConfig.moveDuration.min + diceRandom() * Math.max(0, physicsConfig.moveDuration.max - physicsConfig.moveDuration.min);
         const movementScale = Math.max(0.78, Math.min(1.22, 1800 / Math.max(900, moveDuration)));
-        const travelSpeed = physicsConfig.initialVelocity * 0.55 * movementScale + Math.random() * physicsConfig.initialVelocity * 0.25;
-        const initVx = -entryVector.x * travelSpeed + (Math.random() - 0.5) * 70;
-        const initVz = -entryVector.z * travelSpeed + (Math.random() - 0.5) * 70;
-        const pullHeight = physicsConfig.pullHeight.min + Math.random() * Math.max(0, physicsConfig.pullHeight.max - physicsConfig.pullHeight.min);
-        const pullTime = physicsConfig.pullTime.min + Math.random() * Math.max(0, physicsConfig.pullTime.max - physicsConfig.pullTime.min);
-        const bounceFrequency = physicsConfig.bounceFrequency.min + Math.random() * Math.max(0, physicsConfig.bounceFrequency.max - physicsConfig.bounceFrequency.min);
+        const travelSpeed = physicsConfig.initialVelocity * 0.55 * movementScale + diceRandom() * physicsConfig.initialVelocity * 0.25;
+        const initVx = -entryVector.x * travelSpeed + (diceRandom() - 0.5) * 70;
+        const initVz = -entryVector.z * travelSpeed + (diceRandom() - 0.5) * 70;
+        const pullHeight = physicsConfig.pullHeight.min + diceRandom() * Math.max(0, physicsConfig.pullHeight.max - physicsConfig.pullHeight.min);
+        const pullTime = physicsConfig.pullTime.min + diceRandom() * Math.max(0, physicsConfig.pullTime.max - physicsConfig.pullTime.min);
+        const bounceFrequency = physicsConfig.bounceFrequency.min + diceRandom() * Math.max(0, physicsConfig.bounceFrequency.max - physicsConfig.bounceFrequency.min);
         const bounceSpan = Math.max(0.001, DICE_REFERENCE_DEFAULTS.bounceFrequencyMax - DICE_REFERENCE_DEFAULTS.bounceFrequencyMin);
         const restitution = Math.max(0.30, Math.min(0.52, 0.30 + ((bounceFrequency - DICE_REFERENCE_DEFAULTS.bounceFrequencyMin) / bounceSpan) * 0.22));
-        const spinDuration = physicsConfig.spinDuration.min + Math.random() * Math.max(0, physicsConfig.spinDuration.max - physicsConfig.spinDuration.min);
+        const spinDuration = physicsConfig.spinDuration.min + diceRandom() * Math.max(0, physicsConfig.spinDuration.max - physicsConfig.spinDuration.min);
         const spinRate = physicsConfig.spinRotation * 1000 / Math.max(800, spinDuration);
         const pullVelocity = -(physicsConfig.gravity * Math.max(0.12, pullTime / 1000) * 0.45);
-        const initialRx = Math.random() * 360;
-        const initialRy = Math.random() * 360;
-        const initialRz = Math.random() * 360;
+        const initialRx = diceRandom() * 360;
+        const initialRy = diceRandom() * 360;
+        const initialRz = diceRandom() * 360;
         const body = new RigidBody3D({{
           element: wrap,
           shadowElement: shadow,
@@ -6634,14 +5256,14 @@ def render_game_overlay_html(
           y: pullHeight,
           z: spawnZ,
           vx: initVx,
-          vy: pullVelocity - Math.random() * 35,
+          vy: pullVelocity - diceRandom() * 35,
           vz: initVz,
           rx: initialRx,
           ry: initialRy,
           rz: initialRz,
-          wx: (Math.random() - 0.5) * spinRate * 2.2,
-          wy: (Math.random() - 0.5) * spinRate * 1.8,
-          wz: (Math.random() - 0.5) * spinRate * 2.2,
+          wx: (diceRandom() - 0.5) * spinRate * 2.2,
+          wy: (diceRandom() - 0.5) * spinRate * 1.8,
+          wz: (diceRandom() - 0.5) * spinRate * 2.2,
           targetFace: val,
           shadowOpacity: physicsConfig.shadowOpacity,
           onBounce: (impactSpeed) => {{
@@ -6675,38 +5297,21 @@ def render_game_overlay_html(
       const bubble = document.getElementById("gamble-bubble");
       if (arena) arena.querySelectorAll(".die-wrapper, .die-shadow").forEach(el => el.remove());
 
-      const roll = Number.isFinite(Number(data.dice_roll)) ? Number(data.dice_roll) : 3;
+      const legacyRoll = Number.isFinite(Number(data.dice_roll))
+        ? Math.max(1, Math.min(6, Math.round(Number(data.dice_roll))))
+        : 3;
       const bet = data.bet || 10;
       const sideChosen = data.side_chosen || "大";
-      const eventSide = String(data.winning_side || (roll >= 11 ? "大" : "小"));
-      const eventTriple = eventSide === "圍骰" || data.triple === true;
       const suppliedDice = Array.isArray(data.rolls) && data.rolls.length === 3
         ? data.rolls.map(Number)
         : null;
-      const diceVals = (() => {{
-        const total = Math.max(3, Math.min(18, Math.round(roll)));
-        if (suppliedDice && suppliedDice.every(value => Number.isInteger(value) && value >= 1 && value <= 6) &&
-            suppliedDice.reduce((sum, value) => sum + value, 0) === total) {{
-          return suppliedDice;
-        }}
-        if (eventTriple && total % 3 === 0) {{
-          const face = total / 3;
-          if (face >= 1 && face <= 6) return [face, face, face];
-        }}
-        // Reconstruct a valid Sic Bo triple whose visible faces always sum to
-        // the event total.  The old hand-written table mapped 4 to 2+3+3,
-        // 5 to 2+4+5, etc., so the animation contradicted the announced roll.
-        const values = [1, 1, 1];
-        let remaining = total - 3;
-        for (let index = 0; index < values.length; index++) {{
-          const slotsAfter = values.length - index - 1;
-          const maxAdd = Math.min(5, remaining - slotsAfter);
-          const add = Math.max(0, Math.min(maxAdd, Math.floor(remaining / (values.length - index))));
-          values[index] += add;
-          remaining -= add;
-        }}
-        return values;
-      }})();
+      const sicBoMode = Boolean(
+        suppliedDice && suppliedDice.every(value => Number.isInteger(value) && value >= 1 && value <= 6)
+      );
+      // Backward-compatible contract: the existing Minigame service publishes
+      // one d6 in `dice_roll`.  A true three-dice Sic Bo event must explicitly
+      // supply `rolls`; never fabricate three faces from a one-die result.
+      const diceVals = sicBoMode ? suppliedDice : [legacyRoll];
       let physicalResultShown = false;
 
       stage.classList.add("active");
@@ -6751,10 +5356,18 @@ def render_game_overlay_html(
         }}
 
         if (gamblePhysicsWorld) gamblePhysicsWorld.stop();
-        gamblePhysicsWorld = new StreamPhysicsWorld(arena, webglEngine);
-        // Sic Bo uses the same usable tabletop footprint as Dice/Coin.  The
-        // former tiny tray was narrower than three 52px dice plus collision
-        // clearance, so wall contacts could keep one die wedged indefinitely.
+        const gamblePhysicsInput = data.physics && typeof data.physics === "object" ? data.physics : {{}};
+        const gamblePhysicsSeed = data.physics_seed || gamblePhysicsInput.seed || null;
+        const gambleRandom = gamblePhysicsSeed
+          ? seededRandom(hashSeed(`${{gamblePhysicsSeed}}:gamble-launch`))
+          : Math.random;
+        gamblePhysicsWorld = new StreamPhysicsWorld(arena, webglEngine, {{
+          ...DICE_REFERENCE_DEFAULTS,
+          resultPolicy: gamblePhysicsInput.resultPolicy || "event-replay",
+          physicsSeed: gamblePhysicsSeed
+        }});
+        // Both the legacy one-die game and optional three-dice Sic Bo mode use
+        // the same shared physical tabletop as Dice/Coin.
         gamblePhysicsWorld.bounds = {{ minX: -190, maxX: 190, minZ: -90, maxZ: 90 }};
 
         diceVals.forEach((val, idx) => {{
@@ -6781,7 +5394,7 @@ def render_game_overlay_html(
             shadow.style.display = "block";
           }}
 
-          const angle = (idx / 3) * Math.PI * 2;
+          const angle = (idx / Math.max(1, diceVals.length)) * Math.PI * 2;
           const body = new RigidBody3D({{
             element: wrap,
             shadowElement: shadow,
@@ -6793,17 +5406,17 @@ def render_game_overlay_html(
             restitution: 0.58,
             friction: 0.74,
             x: Math.cos(angle) * 42,
-            y: 110 + Math.random() * 40,
+            y: 110 + gambleRandom() * 40,
             z: Math.sin(angle) * 32,
-            vx: Math.cos(angle) * (130 + Math.random() * 70),
-            vy: -110 - Math.random() * 70,
-            vz: Math.sin(angle) * (90 + Math.random() * 50),
-            rx: Math.random() * 360,
-            ry: Math.random() * 360,
-            rz: Math.random() * 360,
-            wx: (Math.random() - 0.5) * 2400,
-            wy: (Math.random() - 0.5) * 1800,
-            wz: (Math.random() - 0.5) * 2400,
+            vx: Math.cos(angle) * (130 + gambleRandom() * 70),
+            vy: -110 - gambleRandom() * 70,
+            vz: Math.sin(angle) * (90 + gambleRandom() * 50),
+            rx: gambleRandom() * 360,
+            ry: gambleRandom() * 360,
+            rz: gambleRandom() * 360,
+            wx: (gambleRandom() - 0.5) * 2400,
+            wy: (gambleRandom() - 0.5) * 1800,
+            wz: (gambleRandom() - 0.5) * 2400,
             targetFace: val,
             onBounce: (impactSpeed) => {{
               sound.playFile("/assets/sound/casino/dice-throw-1.ogg", () => sound.playWoodClack(Math.min(1.0, impactSpeed / 450)));
@@ -6814,23 +5427,23 @@ def render_game_overlay_html(
 
         gamblePhysicsWorld.onSettled = (settledFaces = []) => {{
           const physicalFaces = settledFaces.filter(value => Number.isInteger(value));
-          if (physicalFaces.length !== 3 || physicalResultShown) return;
+          if (physicalFaces.length !== diceVals.length || physicalResultShown) return;
           physicalResultShown = true;
-          const eventRoll = Number.isFinite(Number(data.dice_roll)) ? Number(data.dice_roll) : null;
-          const visualWon = typeof data.won === "boolean"
-            ? data.won
-            : (!eventTriple && eventSide === sideChosen);
-          tag.innerText = eventRoll === null
-            ? `【${{eventSide}} · 結果已落定】`
-            : `【${{eventSide}} · 開出 ${{eventRoll}} 點】`;
-          tag.className = `gamble-tag ${{eventTriple ? "tag-triple" : (eventSide === "大" ? "tag-big" : "tag-small")}}`;
+          const physicalRoll = physicalFaces.reduce((sum, value) => sum + value, 0);
+          const physicalTriple = sicBoMode && physicalFaces.every(value => value === physicalFaces[0]);
+          const physicalSide = physicalTriple
+            ? "圍骰"
+            : (sicBoMode ? (physicalRoll >= 11 ? "大" : "小") : (physicalRoll >= 4 ? "大" : "小"));
+          const visualWon = !physicalTriple && physicalSide === sideChosen;
+          tag.innerText = `【${{physicalSide}} · 開出 ${{physicalRoll}} 點】`;
+          tag.className = `gamble-tag ${{physicalTriple ? "tag-triple" : (physicalSide === "大" ? "tag-big" : "tag-small")}}`;
           badge.className = `gamble-res-badge ${{visualWon ? "win" : "lose"}}`;
           badge.innerText = visualWon
-            ? `✨ 事件結果：押中【${{sideChosen}}】｜帳務餘額：${{data.balance || 0}} 點`
-            : `💨 事件結果：押【${{sideChosen}}】落空｜帳務餘額：${{data.balance || 0}} 點`;
+            ? `✨ 物理結果：押中【${{sideChosen}}】｜帳務餘額：${{data.balance || 0}} 點`
+            : `💨 物理結果：押【${{sideChosen}}】落空｜帳務餘額：${{data.balance || 0}} 點`;
           bubble.innerText = visualWon
-            ? `🎉 @${{data.user_name || "觀眾"}} 押中事件結果【${{eventSide}}】！`
-            : `@${{data.user_name || "觀眾"}} 事件結果是【${{eventSide}}】。`;
+            ? `🎉 @${{data.user_name || "觀眾"}} 押中物理結果【${{physicalSide}}】！`
+            : `@${{data.user_name || "觀眾"}} 物理結果是【${{physicalSide}}】。`;
           if (visualWon) {{
             triggerScreenEffects(true);
             sound.playFanfare();
@@ -6847,10 +5460,10 @@ def render_game_overlay_html(
           if (!physicalResultShown) {{
             tag.innerText = "【骰盅揭開 · 等待自然落地】";
             tag.className = "gamble-tag tag-big";
+            badge.className = "gamble-res-badge";
+            badge.innerText = `下注【${{sideChosen}}】${{bet}} 點｜等待骰子自然落地`;
+            bubble.innerText = `@${{data.user_name || "觀眾"}} 的骰子仍在碰撞、滾動與收斂……`;
           }}
-          badge.className = "gamble-res-badge";
-          badge.innerText = `下注【${{sideChosen}}】${{bet}} 點｜等待骰子自然落地`;
-          bubble.innerText = `@${{data.user_name || "觀眾"}} 的骰子仍在碰撞、滾動與收斂……`;
         }}, 1800);
       }}, 1250);
 
@@ -7638,7 +6251,7 @@ def render_game_overlay_html(
     window.hideAllStages = hideAllStages;
     window.clearOverlay = hideAllStages;
     window.addEventListener("message", (ev) => {{
-      if (ev.data && ev.data.type === "interactive.demo.event") {{
+      if (ev.data && ev.data.type === "streamsuite.demo.event") {{
         handleOverlayMessage(ev.data.payload || {{}});
       }} else if (ev.data && (ev.data.type === "overlay.reset" || ev.data.type === "game.reset" || ev.data.type === "overlay.clear")) {{
         hideAllStages(ev.data);
@@ -7669,7 +6282,7 @@ def render_preview_dashboard_html(
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>Stream Interactive Workbench</title>
+  <title>StreamSuite 互動工具中控台</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     :root {
@@ -7904,12 +6517,8 @@ def render_preview_dashboard_html(
       background: #ffffff;
       border: 1px solid var(--border);
       border-radius: 14px;
-      /* Keep the stage in view while the operator scrolls through controls. */
-      height: min(72vh, 760px);
-      min-height: 520px;
-      position: sticky;
-      top: 16px;
-      z-index: 20;
+      height: 480px;
+      position: relative;
       overflow: hidden;
       display: flex;
       flex-direction: column;
@@ -7926,18 +6535,9 @@ def render_preview_dashboard_html(
       justify-content: space-between;
       align-items: center;
     }
-    .preview-sticky-hint {
-      margin-left: 8px;
-      color: #6b5db8;
-      font-size: 11px;
-      font-weight: 800;
-      white-space: nowrap;
-    }
     .preview-iframe-wrap {
       width: 100%;
       height: 100%;
-      min-height: 0;
-      flex: 1 1 auto;
       position: relative;
       transition: background 0.2s ease;
     }
@@ -7987,47 +6587,12 @@ def render_preview_dashboard_html(
       border-color: #6b5db8;
       box-shadow: 0 4px 12px rgba(107, 93, 184, 0.22);
     }
-
-    @media (max-width: 720px) {
-      body { padding: 16px; }
-      .header {
-        align-items: flex-start;
-        flex-direction: column;
-        gap: 10px;
-      }
-      .header h1 {
-        font-size: 22px;
-        overflow-wrap: anywhere;
-      }
-      .header > div:last-child { text-align: left !important; }
-      .global-toolbar {
-        align-items: stretch;
-        flex-direction: column;
-      }
-      .toolbar-group {
-        width: 100%;
-        min-width: 0;
-      }
-      .toolbar-group:last-child .tb-btn { width: 100%; justify-content: center; }
-      .preview-container {
-        top: 8px;
-        height: min(68vh, 620px);
-        min-height: 420px;
-      }
-      .preview-header {
-        align-items: flex-start;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .preview-sticky-hint { margin-left: 0; }
-      .grid { grid-template-columns: 1fr; }
-    }
   </style>
 </head>
 <body>
   <div class="header">
     <div>
-      <h1>Stream Interactive Workbench</h1>
+      <h1>StreamSuite 互動工具中控台</h1>
       <p>管理直播互動遊戲、OBS 圖層與觀眾活動。選擇工具後即可即時預覽與測試。</p>
     </div>
     <div style="text-align: right;">
@@ -8066,11 +6631,11 @@ def render_preview_dashboard_html(
   <!-- 置頂即時預覽視窗 -->
   <div class="preview-container">
     <div class="preview-header">
-      <span>即時圖層預覽 <span class="preview-sticky-hint">捲動控制區時保持可見</span></span>
+      <span>即時圖層預覽</span>
       <span>按下工具卡片的測試按鈕即可觸發動畫</span>
     </div>
     <div class="preview-iframe-wrap preview-bg-dark" id="preview-iframe-wrap">
-    <iframe id="preview-iframe" src="__INTERACTIVE_OVERLAY_PATH__"></iframe>
+    <iframe id="preview-iframe" src="__STREAMSUITE_OVERLAY_PATH__"></iframe>
     </div>
   </div>
 
@@ -8268,10 +6833,10 @@ def render_preview_dashboard_html(
     <!-- 8. 骰寶比大小賭博 -->
     <div class="card" data-cat="cat1">
       <div class="card-header">
-        <h2>🎲 骰寶比大小賭博 (Gamble Minigame 3D Sic Bo)</h2>
-        <span class="tag" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24;">3D 碗內碰撞</span>
+        <h2>🎲 猜大小／骰寶 (Gamble Physics)</h2>
+        <span class="tag" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24;">單骰相容＋三骰擴充</span>
       </div>
-      <p class="desc">!gamble 押大押小、金屬骰盅搖晃、揭盅 3 顆實體 3D 骰子碗內激烈碰撞彈跳與圍骰特寫。</p>
+      <p class="desc">既有 !gamble 以單顆 d6 對齊 1–3 小／4–6 大；事件提供 rolls 時可測三顆實體骰子的總和、碰撞與圍骰。</p>
       <div style="display: flex; gap: 8px;">
         <button class="play-hero-btn btn-gold" style="flex: 1;" onclick="triggerEvent({type: 'game.gamble.resolved', user_name: '骰寶王', bet: 50, side_chosen: '大', dice_roll: 5, winning_side: '大', won: true, win_amount: 100, balance: 650})">
           <span>👑 押大 $50 (開 5 點 - 獲勝翻倍)</span>
@@ -8283,7 +6848,7 @@ def render_preview_dashboard_html(
       <div class="btn-group">
         <button class="sub-btn" onclick="triggerEvent({type: 'game.gamble.resolved', user_name: '神算子', bet: 100, side_chosen: '大', dice_roll: 6, winning_side: '大', won: true, win_amount: 200, balance: 1200})">測試【押大 $100 獲勝 (開 6 點)】</button>
         <button class="sub-btn" onclick="triggerEvent({type: 'game.gamble.resolved', user_name: '逆轉王', bet: 100, side_chosen: '小', dice_roll: 1, winning_side: '小', won: true, win_amount: 200, balance: 880})">測試【押小 $100 獲勝 (開 1 點)】</button>
-        <button class="sub-btn" onclick="triggerEvent({type: 'game.gamble.resolved', user_name: '倒楣鬼', bet: 50, side_chosen: '大', dice_roll: 3, winning_side: '圍骰', won: false, win_amount: 0, balance: 150})">測試【開出 3 點 圍骰通殺】</button>
+        <button class="sub-btn" onclick="triggerEvent({type: 'game.gamble.resolved', user_name: '倒楣鬼', bet: 50, side_chosen: '大', dice_roll: 3, rolls: [1, 1, 1], winning_side: '圍骰', won: false, win_amount: 0, balance: 150})">測試【開出 3 點 圍骰通殺】</button>
         <button class="sub-btn danger" onclick="triggerCleanReset('gamble', this)">🚨 重置骰寶</button>
       </div>
       <div class="obs-box">
@@ -8656,14 +7221,14 @@ def render_preview_dashboard_html(
     </div>
   </div>
 
-  <script src="__INTERACTIVE_ASSET_PREFIX__/vendor/three.min.js"></script>
+  <script src="__STREAMSUITE_ASSET_PREFIX__/vendor/three.min.js"></script>
   <script>
-    const STATIC_DEMO = __INTERACTIVE_STATIC_DEMO__;
+    const STATIC_DEMO = __STREAMSUITE_STATIC_DEMO__;
     async function triggerEvent(payload) {
       if (STATIC_DEMO) {
         const iframe = document.getElementById("preview-iframe");
         if (iframe && iframe.contentWindow) {
-          iframe.contentWindow.postMessage({ type: "interactive.demo.event", payload: payload }, "*");
+          iframe.contentWindow.postMessage({ type: "streamsuite.demo.event", payload: payload }, "*");
           return { ok: true, static_demo: true };
         }
         return { ok: false, error: "preview_not_ready" };
@@ -9119,7 +7684,7 @@ def render_preview_dashboard_html(
             "公開展示版：可直接試玩互動動畫；正式 Twitch、RabbitMQ 與 OBS 事件服務仍在本機中控台運行。",
         )
     return (
-        html.replace("__INTERACTIVE_STATIC_DEMO__", "true" if static_demo else "false")
-        .replace("__INTERACTIVE_ASSET_PREFIX__", asset_prefix.rstrip("/"))
-        .replace("__INTERACTIVE_OVERLAY_PATH__", overlay_path)
+        html.replace("__STREAMSUITE_STATIC_DEMO__", "true" if static_demo else "false")
+        .replace("__STREAMSUITE_ASSET_PREFIX__", asset_prefix.rstrip("/"))
+        .replace("__STREAMSUITE_OVERLAY_PATH__", overlay_path)
     )
