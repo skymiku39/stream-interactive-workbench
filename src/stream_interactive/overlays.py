@@ -7904,8 +7904,12 @@ def render_preview_dashboard_html(
       background: #ffffff;
       border: 1px solid var(--border);
       border-radius: 14px;
-      height: 480px;
-      position: relative;
+      /* Keep the stage in view while the operator scrolls through controls. */
+      height: min(72vh, 760px);
+      min-height: 520px;
+      position: sticky;
+      top: 16px;
+      z-index: 20;
       overflow: hidden;
       display: flex;
       flex-direction: column;
@@ -7922,9 +7926,18 @@ def render_preview_dashboard_html(
       justify-content: space-between;
       align-items: center;
     }
+    .preview-sticky-hint {
+      margin-left: 8px;
+      color: #6b5db8;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
     .preview-iframe-wrap {
       width: 100%;
       height: 100%;
+      min-height: 0;
+      flex: 1 1 auto;
       position: relative;
       transition: background 0.2s ease;
     }
@@ -7974,6 +7987,41 @@ def render_preview_dashboard_html(
       border-color: #6b5db8;
       box-shadow: 0 4px 12px rgba(107, 93, 184, 0.22);
     }
+
+    @media (max-width: 720px) {
+      body { padding: 16px; }
+      .header {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .header h1 {
+        font-size: 22px;
+        overflow-wrap: anywhere;
+      }
+      .header > div:last-child { text-align: left !important; }
+      .global-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+      }
+      .toolbar-group {
+        width: 100%;
+        min-width: 0;
+      }
+      .toolbar-group:last-child .tb-btn { width: 100%; justify-content: center; }
+      .preview-container {
+        top: 8px;
+        height: min(68vh, 620px);
+        min-height: 420px;
+      }
+      .preview-header {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .preview-sticky-hint { margin-left: 0; }
+      .grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -8018,7 +8066,7 @@ def render_preview_dashboard_html(
   <!-- 置頂即時預覽視窗 -->
   <div class="preview-container">
     <div class="preview-header">
-      <span>即時圖層預覽</span>
+      <span>即時圖層預覽 <span class="preview-sticky-hint">捲動控制區時保持可見</span></span>
       <span>按下工具卡片的測試按鈕即可觸發動畫</span>
     </div>
     <div class="preview-iframe-wrap preview-bg-dark" id="preview-iframe-wrap">
