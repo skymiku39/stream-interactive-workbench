@@ -6914,7 +6914,7 @@ def render_preview_dashboard_html(
     <div class="card" data-cat="cat1">
       <div class="card-header">
         <h2>✨ 二次元星空抽卡 (Card Gacha)</h2>
-        <span class="tag" style="background: rgba(236, 72, 153, 0.2); color: #f472b6;">手遊召喚</span>
+        <span class="tag" style="background: rgba(236, 72, 153, 0.2); color: #f472b6;">單抽 100 P · 十連 900 P</span>
       </div>
       <p class="desc">撕開卡包真實錄音、向量衝擊光環、3D 翻牌、天樞星輝羅盤全息閃卡。</p>
       <button class="play-hero-btn btn-purple" onclick="playRandomCardGacha(false)">
@@ -6940,7 +6940,7 @@ def render_preview_dashboard_html(
     <div class="card" data-cat="cat1">
       <div class="card-header">
         <h2>🎰 實體日式扭蛋機 (Gashapon)</h2>
-        <span class="tag" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24;">秋葉原扭蛋</span>
+        <span class="tag" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24;">每次 50 P</span>
       </div>
       <p class="desc">金屬投幣聲、旋鈕 360 度轉動阻尼、滾落震動、晶球彈開模型亮相。</p>
       <button class="play-hero-btn btn-gold" onclick="playRandomGashapon()">
@@ -6962,7 +6962,7 @@ def render_preview_dashboard_html(
     <div class="card" data-cat="cat1">
       <div class="card-header">
         <h2>🙏 寺廟靈驗擲筊 (BwaBwei)</h2>
-        <span class="tag" style="background: rgba(239, 68, 68, 0.2); color: #f87171;">台灣民俗</span>
+        <span class="tag" style="background: rgba(239, 68, 68, 0.2); color: #f87171;">免費／兌換制</span>
       </div>
       <p class="desc">紅木拋物線自旋翻滾、物理木塊碰撞音效、神明指點吉祥光環。</p>
       <button class="play-hero-btn" onclick="playRandomBwei()">
@@ -6985,18 +6985,18 @@ def render_preview_dashboard_html(
     <div class="card" data-cat="cat1">
       <div class="card-header">
         <h2>🎰 復古拉霸機 (Classic Slot)</h2>
-        <span class="tag" style="background: rgba(16, 185, 129, 0.2); color: #34d399;">拉斯維加斯</span>
+        <span class="tag" style="background: rgba(16, 185, 129, 0.2); color: #34d399;">下注 1–1000 P</span>
       </div>
       <p class="desc">實體拉桿物理下扳、滾輪機械式逐輪急停、777 爆獎警報與金幣雨噴發。</p>
       <button class="play-hero-btn btn-gold" onclick="playRandomSlot()">
         <span>🎰 正常拉桿滾動 (隨機機率)</span>
       </button>
       <div class="btn-group">
-        <button class="sub-btn" onclick="triggerEvent({type: 'game.slot.rolled', user_name: '散客', bet: 20, reels: ['LEMON', 'BELL', '7'], win: 0, multiplier: 0})">測試【未中獎落空】</button>
-        <button class="sub-btn" onclick="triggerEvent({type: 'game.slot.rolled', user_name: '常客', bet: 50, reels: ['CHERRY', 'CHERRY', 'BELL'], win: 100, multiplier: 2})">測試【櫻桃二連（2x 小獎）】</button>
-        <button class="sub-btn" onclick="triggerEvent({type: 'game.slot.rolled', user_name: '老手', bet: 50, reels: ['CHERRY', 'CHERRY', 'CHERRY'], win: 250, multiplier: 5})">測試【櫻桃三連（5x 彩金）】</button>
-        <button class="sub-btn" onclick="triggerEvent({type: 'game.slot.rolled', user_name: '大亨', bet: 100, reels: ['BAR', 'BAR', 'BAR'], win: 2000, multiplier: 20})">測試【BAR BAR BAR（20x 高額）】</button>
-        <button class="sub-btn" onclick="triggerEvent({type: 'game.slot.rolled', user_name: '幸運星', bet: 100, reels: ['7', '7', '7'], win: 5000, multiplier: 50, desc: '777 爆棚！'})">測試【777 JACKPOT（50x 大獎）】</button>
+        <button class="sub-btn" onclick="triggerEvent({type: 'game.slot.rolled', user_name: '散客', bet: 20, reels: ['🍋', '🔔', '7️⃣'], win: 0, multiplier: 0})">測試【未中獎落空】</button>
+        <button class="sub-btn" onclick="triggerEvent({type: 'game.slot.rolled', user_name: '常客', bet: 50, reels: ['🍒', '🍒', '🔔'], win: 50, multiplier: 1})">測試【櫻桃二連（1x 返還）】</button>
+        <button class="sub-btn" onclick="triggerEvent({type: 'game.slot.rolled', user_name: '老手', bet: 50, reels: ['🍒', '🍒', '🍒'], win: 100, multiplier: 2})">測試【櫻桃三連（2x 彩金）】</button>
+        <button class="sub-btn" onclick="triggerEvent({type: 'game.slot.rolled', user_name: '大亨', bet: 100, reels: ['💎', '💎', '💎'], win: 2000, multiplier: 20})">測試【鑽石三連（20x 高額）】</button>
+        <button class="sub-btn" onclick="triggerEvent({type: 'game.slot.rolled', user_name: '幸運星', bet: 100, reels: ['7️⃣', '7️⃣', '7️⃣'], win: 5000, multiplier: 50, desc: '777 爆棚！'})">測試【777 JACKPOT（50x 大獎）】</button>
         <button class="sub-btn danger" onclick="triggerCleanReset('slot', this)">🚨 重置拉霸機</button>
       </div>
       <div class="obs-box">
@@ -7009,16 +7009,16 @@ def render_preview_dashboard_html(
     <div class="card" data-cat="cat1">
       <div class="card-header">
         <h2>🎡 命運幸運大轉盤 (Wheel of Fortune)</h2>
-        <span class="tag" style="background: rgba(168, 85, 247, 0.2); color: #c084fc;">電視綜藝</span>
+        <span class="tag" style="background: rgba(168, 85, 247, 0.2); color: #c084fc;">每次 30 P</span>
       </div>
       <p class="desc">多色漸層色塊圓盤、真實棘爪撥動卡嗒音效、指針回彈與減速停格。</p>
       <button class="play-hero-btn" onclick="playRandomWheel()">
         <span>🎡 轉動幸運大轉盤 (隨機停止)</span>
       </button>
       <div class="btn-group">
-        <button class="sub-btn" onclick="triggerEvent({type: 'game.wheel.spun', user_name: '大胃王', items: ['頭獎 1000 點', '銘謝惠顧', '再來一次', '三獎 200 點', '喝苦茶一杯'], target_index: 0})">測試命中【頭獎 1000 點】</button>
-        <button class="sub-btn" onclick="triggerEvent({type: 'game.wheel.spun', user_name: '小衰神', items: ['頭獎 1000 點', '銘謝惠顧', '再來一次', '三獎 200 點', '喝苦茶一杯'], target_index: 1})">測試命中【銘謝惠顧】</button>
-        <button class="sub-btn" onclick="triggerEvent({type: 'game.wheel.spun', user_name: '苦主', items: ['頭獎 1000 點', '銘謝惠顧', '再來一次', '三獎 200 點', '喝苦茶一杯'], target_index: 4})">測試命中【喝苦茶一杯】</button>
+        <button class="sub-btn" onclick="triggerEvent({type: 'game.wheel.spun', user_name: '大胃王', items: ['頭獎 1000 點', '銘謝惠顧', '二獎 500 點', '再來一次', '三獎 200 點', '專屬稱號', '點數 50', '點數 100'], target_index: 0})">測試命中【頭獎 1000 點】</button>
+        <button class="sub-btn" onclick="triggerEvent({type: 'game.wheel.spun', user_name: '小衰神', items: ['頭獎 1000 點', '銘謝惠顧', '二獎 500 點', '再來一次', '三獎 200 點', '專屬稱號', '點數 50', '點數 100'], target_index: 1})">測試命中【銘謝惠顧】</button>
+        <button class="sub-btn" onclick="triggerEvent({type: 'game.wheel.spun', user_name: '苦主', items: ['頭獎 1000 點', '銘謝惠顧', '二獎 500 點', '再來一次', '三獎 200 點', '專屬稱號', '點數 50', '點數 100'], target_index: 7})">測試命中【點數 100】</button>
         <button class="sub-btn danger" onclick="triggerCleanReset('wheel', this)">🚨 重置轉盤</button>
       </div>
       <div class="obs-box">
@@ -7052,7 +7052,7 @@ def render_preview_dashboard_html(
     <div class="card" data-cat="cat1">
       <div class="card-header">
         <h2>🎲 3D 擲骰</h2>
-        <span class="tag" style="background: #eeeafd; color: #5a4da8;">骰子工具</span>
+        <span class="tag" style="background: rgba(139, 124, 255, 0.18); color: #c4bbff;">免費 · d6 展示</span>
       </div>
       <p class="desc">參考 GACHAGO／Skymiku Dice 的單骰、多骰與方向投擲；結果由事件提供，動畫負責呈現投擲過程。</p>
       <div style="display: flex; gap: 8px; margin-bottom: 8px;">
@@ -7089,20 +7089,20 @@ def render_preview_dashboard_html(
     <div class="card" data-cat="cat1">
       <div class="card-header">
         <h2>🎲 猜大小／骰寶 (Gamble Physics)</h2>
-        <span class="tag" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24;">單骰相容＋三骰擴充</span>
+        <span class="tag" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24;">一般 1–10000 P · 兌換 50 P</span>
       </div>
       <p class="desc">既有 !gamble 以單顆 d6 對齊 1–3 小／4–6 大；事件提供 rolls 時可測三顆實體骰子的總和、碰撞與圍骰。</p>
       <div style="display: flex; gap: 8px;">
         <button class="play-hero-btn btn-gold" style="flex: 1;" onclick="triggerEvent({type: 'game.gamble.resolved', user_name: '骰寶王', bet: 50, side_chosen: '大', dice_roll: 5, winning_side: '大', won: true, win_amount: 100, balance: 650})">
-          <span>👑 押大 $50 (開 5 點 - 獲勝翻倍)</span>
+          <span>👑 押大 50 P（開 5 點・獲勝翻倍）</span>
         </button>
         <button class="play-hero-btn btn-purple" style="flex: 1;" onclick="triggerEvent({type: 'game.gamble.resolved', user_name: '散客', bet: 30, side_chosen: '小', dice_roll: 4, winning_side: '大', won: false, win_amount: 0, balance: 220})">
-          <span>💸 押小 $30 (開 4 點 - 落敗扣點)</span>
+          <span>💸 押小 30 P（開 4 點・落敗扣點）</span>
         </button>
       </div>
       <div class="btn-group">
-        <button class="sub-btn" onclick="triggerEvent({type: 'game.gamble.resolved', user_name: '神算子', bet: 100, side_chosen: '大', dice_roll: 6, winning_side: '大', won: true, win_amount: 200, balance: 1200})">測試【押大 $100 獲勝 (開 6 點)】</button>
-        <button class="sub-btn" onclick="triggerEvent({type: 'game.gamble.resolved', user_name: '逆轉王', bet: 100, side_chosen: '小', dice_roll: 1, winning_side: '小', won: true, win_amount: 200, balance: 880})">測試【押小 $100 獲勝 (開 1 點)】</button>
+        <button class="sub-btn" onclick="triggerEvent({type: 'game.gamble.resolved', user_name: '神算子', bet: 100, side_chosen: '大', dice_roll: 6, winning_side: '大', won: true, win_amount: 200, balance: 1200})">測試【押大 100 P 獲勝（開 6 點）】</button>
+        <button class="sub-btn" onclick="triggerEvent({type: 'game.gamble.resolved', user_name: '逆轉王', bet: 100, side_chosen: '小', dice_roll: 1, winning_side: '小', won: true, win_amount: 200, balance: 880})">測試【押小 100 P 獲勝（開 1 點）】</button>
         <button class="sub-btn" onclick="triggerEvent({type: 'game.gamble.resolved', user_name: '倒楣鬼', bet: 50, side_chosen: '大', dice_roll: 3, rolls: [1, 1, 1], winning_side: '圍骰', won: false, win_amount: 0, balance: 150})">測試【開出 3 點 圍骰通殺】</button>
         <button class="sub-btn danger" onclick="triggerCleanReset('gamble', this)">🚨 重置骰寶</button>
       </div>
@@ -7819,26 +7819,45 @@ def render_preview_dashboard_html(
 
     // 4. 正常拉霸機
     function playRandomSlot() {
-      const symbols = ["🍒", "LEMON", "BELL", "BAR", "7"];
-      const r1 = symbols[Math.floor(Math.random() * symbols.length)];
-      const r2 = symbols[Math.floor(Math.random() * symbols.length)];
-      const r3 = symbols[Math.floor(Math.random() * symbols.length)];
-
+      // Keep the showcase generator identical to minigame.SLOT_SYMBOLS and
+      // SLOT_WEIGHTS instead of inventing a separate uniform slot machine.
+      const pool = [
+        { symbol: "🍒", weight: 32 },
+        { symbol: "🍋", weight: 26 },
+        { symbol: "🍇", weight: 20 },
+        { symbol: "🔔", weight: 12 },
+        { symbol: "💎", weight: 7 },
+        { symbol: "7️⃣", weight: 3 }
+      ];
+      const pick = () => {
+        let roll = Math.random() * 100;
+        for (const item of pool) {
+          roll -= item.weight;
+          if (roll < 0) return item.symbol;
+        }
+        return pool[0].symbol;
+      };
+      const reels = [pick(), pick(), pick()];
+      const bet = 50;
       let win = 0;
       let mult = 0;
-      if (r1 === r2 && r2 === r3) {
-        if (r1 === "7") { win = 5000; mult = 50; }
-        else if (r1 === "BAR") { win = 1000; mult = 20; }
-        else { win = 500; mult = 10; }
-      } else if (r1 === r2 || r2 === r3 || r1 === r3) {
-        win = 100; mult = 2;
+      if (reels[0] === reels[1] && reels[1] === reels[2]) {
+        const tripleMultipliers = { "7️⃣": 50, "💎": 20, "🔔": 10, "🍇": 5, "🍋": 3, "🍒": 2 };
+        mult = tripleMultipliers[reels[0]] || 0;
+        win = bet * mult;
+      } else if (reels.filter(symbol => symbol === "7️⃣").length === 2) {
+        mult = 2;
+        win = bet * mult;
+      } else if (reels.filter(symbol => symbol === "🍒").length === 2) {
+        mult = 1;
+        win = bet * mult;
       }
 
       triggerEvent({
         type: "game.slot.rolled",
         user_name: "常客阿財",
-        bet: 50,
-        reels: [r1, r2, r3],
+        bet: bet,
+        reels: reels,
         win: win,
         multiplier: mult
       });
@@ -7847,7 +7866,13 @@ def render_preview_dashboard_html(
     // 5. 正常轉動幸運輪盤
     function playRandomWheel() {
       const items = ["頭獎 1000 點", "銘謝惠顧", "二獎 500 點", "再來一次", "三獎 200 點", "專屬稱號", "點數 50", "點數 100"];
-      const targetIdx = Math.floor(Math.random() * items.length);
+      const weights = [1, 28, 4, 12, 10, 5, 20, 20];
+      let roll = Math.random() * weights.reduce((sum, weight) => sum + weight, 0);
+      let targetIdx = items.length - 1;
+      for (let idx = 0; idx < weights.length; idx++) {
+        roll -= weights[idx];
+        if (roll < 0) { targetIdx = idx; break; }
+      }
       triggerEvent({
         type: "game.wheel.spun",
         user_name: "旋轉達人",
