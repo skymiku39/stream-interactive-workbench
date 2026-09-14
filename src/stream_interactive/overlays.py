@@ -5139,6 +5139,12 @@ def render_game_overlay_html(
       const normalizedRolls = rolls
         .map(value => Math.round(Number(value)))
         .filter(value => Number.isFinite(value));
+      if (normalizedRolls.length === 0) {{
+        stage.classList.add("active");
+        bubble.innerText = `@${{data.user_name || "觀眾"}} 收到骰子事件，但沒有可用骰面（暫不猜測動畫）`;
+        safeTimeout(() => hideAllStages(), 4200);
+        return;
+      }}
       const unsupportedRolls = normalizedRolls.filter(value => value < 1 || value > 6);
       if (unsupportedRolls.length > 0) {{
         stage.classList.add("active");
@@ -5147,7 +5153,6 @@ def render_game_overlay_html(
         return;
       }}
       rolls = normalizedRolls;
-      if (rolls.length === 0) rolls = [1];
 
       stage.classList.add("active");
       bubble.innerText = `@${{data.user_name || "觀眾"}} 正在擲骰，等待骰子自然落地……`;
