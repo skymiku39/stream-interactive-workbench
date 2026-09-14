@@ -2540,6 +2540,104 @@ def render_game_overlay_html(
       font-weight: 700;
       color: #10b981;
     }}
+
+    /* =====================================================================
+       StreamSuite Live Arcade visual system
+       One palette, one surface language, distinct game accents.
+       ===================================================================== */
+    :root {{
+      --ss-ink: #f7f8ff;
+      --ss-muted: #a8b3c7;
+      --ss-deep: #070d19;
+      --ss-surface: rgba(10, 18, 34, 0.88);
+      --ss-surface-raised: rgba(17, 28, 50, 0.94);
+      --ss-line: rgba(166, 190, 226, 0.22);
+      --ss-brand: #8b7cff;
+      --ss-cyan: #4fd1c5;
+      --ss-gold: #f6c85f;
+      --ss-pink: #f38bbd;
+      --ss-success: #5ee7a4;
+      --ss-danger: #fb7185;
+      --ss-radius: 18px;
+      --ss-shadow: 0 18px 48px rgba(0, 0, 0, 0.44);
+    }}
+    #overlay-root {{
+      color: var(--ss-ink);
+      isolation: isolate;
+    }}
+    #overlay-root::before {{
+      content: "";
+      position: absolute;
+      inset: 4%;
+      border-radius: 32px;
+      background:
+        radial-gradient(circle at 50% 20%, rgba(139, 124, 255, 0.10), transparent 42%),
+        radial-gradient(circle at 22% 78%, rgba(79, 209, 197, 0.07), transparent 32%);
+      pointer-events: none;
+      z-index: 1;
+    }}
+    #status-indicator {{
+      top: 16px;
+      right: 18px;
+      padding: 6px 11px;
+      color: var(--ss-muted);
+      background: rgba(7, 13, 25, 0.76);
+      border: 1px solid var(--ss-line);
+      border-radius: 999px;
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.24);
+      backdrop-filter: blur(12px);
+      letter-spacing: 0.04em;
+    }}
+    .game-float-bubble {{
+      max-width: min(92vw, 520px);
+      padding: 11px 20px;
+      color: var(--ss-ink);
+      background: linear-gradient(135deg, rgba(12, 24, 44, 0.94), rgba(11, 18, 34, 0.88));
+      border: 1px solid rgba(166, 190, 226, 0.32);
+      border-radius: 999px;
+      box-shadow: var(--ss-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+      backdrop-filter: blur(14px);
+      line-height: 1.35;
+      letter-spacing: 0.015em;
+    }}
+    .bwei-banner,
+    .gamble-res-badge,
+    .gamble-tag {{
+      border-radius: var(--ss-radius);
+      box-shadow: var(--ss-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(14px);
+    }}
+    .bwei-banner {{
+      min-width: 290px;
+      background: linear-gradient(135deg, rgba(19, 27, 48, 0.95), rgba(8, 14, 27, 0.94));
+      border: 1px solid rgba(246, 200, 95, 0.66);
+    }}
+    .bwei-user {{ color: var(--ss-muted); letter-spacing: 0.02em; }}
+    .bwei-desc {{ color: var(--ss-gold); line-height: 1.4; }}
+    .slot-cabinet,
+    .gashapon-machine,
+    .card-front-side,
+    .wheel-container {{
+      box-shadow: var(--ss-shadow), 0 0 0 1px rgba(139, 124, 255, 0.14);
+    }}
+    .slot-cabinet {{ border-color: rgba(246, 200, 95, 0.82); }}
+    .gashapon-sign {{ letter-spacing: 0.16em; }}
+    .gamble-tag {{ padding: 7px 18px; }}
+    .gamble-res-badge {{
+      border-width: 1px;
+      letter-spacing: 0.01em;
+    }}
+    .throw-plane {{
+      background:
+        radial-gradient(circle at 50% 44%, rgba(139, 124, 255, 0.15), transparent 54%),
+        linear-gradient(135deg, rgba(8, 25, 43, 0.94), rgba(12, 34, 52, 0.82));
+      border-color: rgba(166, 190, 226, 0.38);
+    }}
+    @media (prefers-reduced-motion: reduce) {{
+      #god-rays,
+      .res-standing {{ animation: none !important; }}
+      *, *::before, *::after {{ scroll-behavior: auto !important; }}
+    }}
   </style>
 </head>
 <body>
@@ -6634,6 +6732,115 @@ def render_preview_dashboard_html(
       color: #ffffff;
       border-color: #6b5db8;
       box-shadow: 0 4px 12px rgba(107, 93, 184, 0.22);
+    }
+
+    /* StreamSuite Live Arcade dashboard tokens */
+    :root {
+      --bg: #070d19;
+      --card-bg: rgba(13, 23, 42, 0.90);
+      --border: rgba(166, 190, 226, 0.22);
+      --primary: #8b7cff;
+      --accent: #4fd1c5;
+      --pink: #f38bbd;
+      --purple: #8b7cff;
+      --green: #5ee7a4;
+      --text: #f7f8ff;
+      --muted: #a8b3c7;
+      --shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
+    }
+    body {
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 10% -5%, rgba(139, 124, 255, 0.18), transparent 34%),
+        radial-gradient(circle at 92% 12%, rgba(79, 209, 197, 0.12), transparent 30%),
+        linear-gradient(160deg, #070d19 0%, #0b1426 55%, #0a1020 100%);
+      color: var(--text);
+    }
+    .header {
+      border-bottom-color: rgba(166, 190, 226, 0.18);
+    }
+    .header h1 { color: var(--text); letter-spacing: 0.02em; }
+    .header p { color: var(--muted); }
+    .card,
+    .global-toolbar,
+    .preview-container {
+      background: linear-gradient(145deg, rgba(17, 29, 52, 0.94), rgba(9, 17, 32, 0.94));
+      border-color: var(--border);
+      box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+    .card h2 { color: var(--text); }
+    .desc,
+    .toolbar-label,
+    .header p { color: var(--muted); }
+    .tag-live {
+      background: rgba(94, 231, 164, 0.12);
+      color: var(--green);
+      border-color: rgba(94, 231, 164, 0.42);
+    }
+    button.sub-btn,
+    .copy-btn,
+    .tb-btn,
+    .nav-tab {
+      color: #d7def0;
+      background: rgba(20, 34, 59, 0.80);
+      border-color: var(--border);
+    }
+    button.sub-btn:hover,
+    .copy-btn:hover,
+    .tb-btn:hover,
+    .nav-tab:hover {
+      color: var(--text);
+      background: rgba(139, 124, 255, 0.16);
+      border-color: rgba(139, 124, 255, 0.56);
+    }
+    .play-hero-btn {
+      background: linear-gradient(135deg, #8b7cff, #6256d9);
+      box-shadow: 0 10px 24px rgba(98, 86, 217, 0.32);
+    }
+    .play-hero-btn:hover {
+      background: linear-gradient(135deg, #9c90ff, #6c60e8);
+      box-shadow: 0 14px 28px rgba(98, 86, 217, 0.42);
+    }
+    .play-hero-btn.btn-gold {
+      background: linear-gradient(135deg, #f6c85f, #d99b2b);
+      color: #19140a;
+      box-shadow: 0 10px 24px rgba(246, 200, 95, 0.24);
+    }
+    .play-hero-btn.btn-cyan {
+      background: linear-gradient(135deg, #4fd1c5, #219caa);
+      color: #061519;
+      box-shadow: 0 10px 24px rgba(79, 209, 197, 0.22);
+    }
+    .obs-box {
+      color: #c4bbff;
+      background: rgba(5, 12, 24, 0.70);
+      border-color: var(--border);
+    }
+    .preview-header {
+      color: var(--muted);
+      background: rgba(9, 17, 32, 0.92);
+      border-bottom-color: var(--border);
+    }
+    .preview-bg-dark { background: #050a14 !important; }
+    .preview-bg-checker {
+      background-color: #111c31 !important;
+      background-image: linear-gradient(45deg, #172642 25%, transparent 25%),
+                        linear-gradient(-45deg, #172642 25%, transparent 25%),
+                        linear-gradient(45deg, transparent 75%, #172642 75%),
+                        linear-gradient(-45deg, transparent 75%, #172642 75%) !important;
+    }
+    .nav-tabs { border-bottom-color: var(--border); }
+    .nav-tab.active {
+      background: linear-gradient(135deg, #8b7cff, #6256d9);
+      border-color: #8b7cff;
+      box-shadow: 0 8px 20px rgba(98, 86, 217, 0.30);
+    }
+    @media (max-width: 760px) {
+      body { padding: 16px; }
+      .grid { grid-template-columns: minmax(0, 1fr); }
+      .header { align-items: flex-start; gap: 12px; flex-direction: column; }
+      .header > div:last-child { text-align: left !important; }
+      .preview-container { height: 420px; }
     }
   </style>
 </head>

@@ -3,7 +3,7 @@
   "relationship": "streamsuite-canonical/workbench-generated",
   "source": "https://github.com/skymiku39/streamsuite",
   "files": {
-    "src/stream_interactive/overlays.py": "7c272e3095d0d8e43969a9934a69b9a4d1d9a0c264133836d71a90f6005ef3ab",
+    "src/stream_interactive/overlays.py": "923e656dae0d0582608ac2492c2081fca83b9ac1f213101944b1e2bd5e5661e7",
     "src/stream_interactive/assets/characters/r_dennis.png": "77a71b618fe6f631136263f44b4ed61c063be50691f39de340f45097a255e659",
     "src/stream_interactive/assets/characters/r_fuffington.png": "73b4e330e14cb5fcfbfa68a347569c5e1f678cdefabd3bc1bd0fd7a64e5cfcb4",
     "src/stream_interactive/assets/characters/sr_daiki.png": "c9f5212e297b06f0f21da2e90bb1c9c38d7f90ef3fe327565898f908e9ece3d9",
