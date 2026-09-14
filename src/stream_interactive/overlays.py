@@ -2650,7 +2650,7 @@ def render_game_overlay_html(
           <div class="cabinet-controls">
             <div class="coin-slot">
               <div class="coin-slot-hole"></div>
-              <span>100¥</span>
+              <span>50 P</span>
             </div>
             <div class="crank-assembly">
               <div id="gashapon-crank" class="crank-dial">
@@ -3545,17 +3545,36 @@ def render_game_overlay_html(
       const user = document.getElementById("bwei-user");
       const desc = document.getElementById("bwei-desc");
 
-      const resType = data.result || "sheng";
-      const resName = data.name || (resType === "sheng" ? "聖筊" : resType === "xiao" ? "笑筊" : resType === "yin" ? "陰筊" : "立筊");
+      // The service publishes result_code/result_name/description.  Keep the
+      // legacy demo aliases readable, but never let an unknown canonical code
+      // silently fall back to a different visual outcome.
+      const rawResType = data.result_code || data.result || "";
+      const resultTypeMap = {{
+        divine_li: "standing",
+        divine_sheng: "sheng",
+        divine_xiao: "xiao",
+        divine_yin: "yin",
+        li: "standing",
+        standing: "standing",
+        sheng: "sheng",
+        xiao: "xiao",
+        laugh: "xiao",
+        yin: "yin"
+      }};
+      const resType = resultTypeMap[String(rawResType).trim().toLowerCase()] || "sheng";
+      const resName = data.result_name || data.name || (resType === "sheng" ? "聖筊" : resType === "xiao" ? "笑筊" : resType === "yin" ? "陰筊" : "立筊");
+      const description = data.description || data.desc;
       const q = data.question ? ` 問：「${{data.question}}」` : "";
 
       user.innerText = `@${{data.user_name || "觀眾"}}${{q}} 誠心擲出：`;
       title.innerText = `【 ${{resName}} 】`;
-      desc.innerText = data.desc || (resType === "sheng" ? "神明應允，大吉大利！" : resType === "xiao" ? "神明微笑，若有所思。" : resType === "yin" ? "神明不允，另擇良時。" : "神蹟降臨！直立不倒！");
+      desc.innerText = description || (resType === "sheng" ? "神明應允，大吉大利！" : resType === "xiao" ? "神明微笑，若有所思。" : resType === "yin" ? "神明不允，另擇良時。" : "神蹟降臨！直立不倒！");
       title.className = `bwei-title res-${{resType}}`;
 
-      const isLeftCurved = data.left === "curved";
-      const isRightCurved = data.right === "curved";
+      const leftShape = data.left || (resType === "sheng" || resType === "xiao" ? "flat" : "curved");
+      const rightShape = data.right || (resType === "sheng" ? "curved" : resType === "standing" ? "standing" : "curved");
+      const isLeftCurved = leftShape === "curved";
+      const isRightCurved = rightShape === "curved";
       document.getElementById("cup-left-path").setAttribute("fill", isLeftCurved ? "url(#grad-curved-left)" : "url(#grad-flat-left)");
       document.getElementById("cup-right-path").setAttribute("fill", isRightCurved ? "url(#grad-curved-right)" : "url(#grad-flat-right)");
       document.getElementById("cup-left-ridge").style.display = isLeftCurved ? "block" : "none";
@@ -3647,15 +3666,25 @@ def render_game_overlay_html(
     // 3. 實體日式扭蛋機 (Gashapon - Realistic Bandai Capsule Machine)
     // SSOT：須與 minigame.GASHAPON_TOYS 名稱／圖路徑一致
     const GASHAPON_TOY_POOL = [
-      {{ name: "機甲守衛 Q 版公仔", desc: "★ 機甲先鋒限定收藏 ★", image: "/assets/toys/toy_robot.png" }},
-      {{ name: "熱血冒險家 探險公仔", desc: "★ 遺跡探索限定收藏 ★", image: "/assets/toys/toy_adventurer.png" }},
-      {{ name: "呆萌小殭屍 萬聖公仔", desc: "★ 夜行狂歡限定收藏 ★", image: "/assets/toys/toy_zombie.png" }},
-      {{ name: "弗芬頓紳士 絨毛布偶", desc: "★ 療癒毛球限定收藏 ★", image: "/assets/toys/toy_fuff.png" }}
+      {{ name: "機甲守衛 Q 版公仔", desc: "★ 機甲先鋒限定收藏 ★", image: "/assets/toys/toy_robot.png", weight: 20 }},
+      {{ name: "熱血冒險家 探險公仔", desc: "★ 遺跡探索限定收藏 ★", image: "/assets/toys/toy_adventurer.png", weight: 25 }},
+      {{ name: "呆萌小殭屍 萬聖公仔", desc: "★ 夜行狂歡限定收藏 ★", image: "/assets/toys/toy_zombie.png", weight: 30 }},
+      {{ name: "弗芬頓紳士 絨毛布偶", desc: "★ 療癒毛球限定收藏 ★", image: "/assets/toys/toy_fuff.png", weight: 25 }}
     ];
+
+    function pickWeightedGashaponToy() {{
+      const totalWeight = GASHAPON_TOY_POOL.reduce((sum, toy) => sum + Number(toy.weight || 0), 0);
+      let roll = Math.random() * totalWeight;
+      for (const toy of GASHAPON_TOY_POOL) {{
+        roll -= Number(toy.weight || 0);
+        if (roll < 0) return toy;
+      }}
+      return GASHAPON_TOY_POOL[GASHAPON_TOY_POOL.length - 1];
+    }}
 
     function resolveGashaponToy(raw) {{
       if (!raw || !raw.name) {{
-        const randToy = GASHAPON_TOY_POOL[Math.floor(Math.random() * GASHAPON_TOY_POOL.length)];
+        const randToy = pickWeightedGashaponToy();
         return Object.assign({{}}, randToy, raw || {{}});
       }}
       const byName = GASHAPON_TOY_POOL.find(t => t.name === raw.name);
@@ -5097,21 +5126,27 @@ def render_game_overlay_html(
       if (rolls.length === 0) {{
         if (total <= 6) {{
           rolls = [total];
-        }} else if (total <= 12) {{
-          const d1 = Math.min(6, Math.max(1, Math.floor(total / 2)));
-          const d2 = total - d1;
-          rolls = [d1, d2];
         }} else {{
-          const d1 = Math.min(6, Math.max(1, Math.floor(total / 3)));
-          const d2 = Math.min(6, Math.max(1, Math.floor((total - d1) / 2)));
-          const d3 = total - d1 - d2;
-          rolls = [d1, d2, d3];
+          // A total without per-die faces is not enough information to
+          // reconstruct a truthful multi-die animation. Do not fabricate
+          // faces just to make the scene look complete.
+          stage.classList.add("active");
+          bubble.innerText = `@${{data.user_name || "觀眾"}} 擲出總和 ${{total}} 點（缺少各顆骰面，暫不猜測動畫）`;
+          safeTimeout(() => hideAllStages(), 4200);
+          return;
         }}
       }}
-      rolls = rolls
+      const normalizedRolls = rolls
         .map(value => Math.round(Number(value)))
-        .filter(value => Number.isFinite(value))
-        .map(value => Math.max(1, Math.min(6, value)));
+        .filter(value => Number.isFinite(value));
+      const unsupportedRolls = normalizedRolls.filter(value => value < 1 || value > 6);
+      if (unsupportedRolls.length > 0) {{
+        stage.classList.add("active");
+        bubble.innerText = `@${{data.user_name || "觀眾"}} 擲出 ${{data.detail || `總和 ${{total}} 點`}}（目前動畫僅支援 d6）`;
+        safeTimeout(() => hideAllStages(), 4200);
+        return;
+      }}
+      rolls = normalizedRolls;
       if (rolls.length === 0) rolls = [1];
 
       stage.classList.add("active");
@@ -5434,17 +5469,25 @@ def render_game_overlay_html(
           const physicalSide = physicalTriple
             ? "圍骰"
             : (sicBoMode ? (physicalRoll >= 11 ? "大" : "小") : (physicalRoll >= 4 ? "大" : "小"));
-          const visualWon = !physicalTriple && physicalSide === sideChosen;
+          const physicalWon = !physicalTriple && physicalSide === sideChosen;
+          // Account settlement is authoritative. The physical side remains a
+          // useful visual explanation, but it must not override data.won.
+          const eventWon = typeof data.won === "boolean" ? data.won : physicalWon;
+          const outcomeMismatch = typeof data.won === "boolean" && eventWon !== physicalWon;
+          const payout = Number(data.win_amount || 0);
           tag.innerText = `【${{physicalSide}} · 開出 ${{physicalRoll}} 點】`;
           tag.className = `gamble-tag ${{physicalTriple ? "tag-triple" : (physicalSide === "大" ? "tag-big" : "tag-small")}}`;
-          badge.className = `gamble-res-badge ${{visualWon ? "win" : "lose"}}`;
-          badge.innerText = visualWon
-            ? `✨ 物理結果：押中【${{sideChosen}}】｜帳務餘額：${{data.balance || 0}} 點`
-            : `💨 物理結果：押【${{sideChosen}}】落空｜帳務餘額：${{data.balance || 0}} 點`;
-          bubble.innerText = visualWon
-            ? `🎉 @${{data.user_name || "觀眾"}} 押中物理結果【${{physicalSide}}】！`
-            : `@${{data.user_name || "觀眾"}} 物理結果是【${{physicalSide}}】。`;
-          if (visualWon) {{
+          badge.className = `gamble-res-badge ${{eventWon ? "win" : "lose"}}`;
+          badge.innerText = eventWon
+            ? `✨ 結算結果：押中【${{sideChosen}}】｜派彩 ${{payout}} 點｜帳務餘額：${{data.balance || 0}} 點`
+            : `💨 結算結果：押【${{sideChosen}}】落空｜帳務餘額：${{data.balance || 0}} 點`;
+          bubble.innerText = eventWon
+            ? `🎉 @${{data.user_name || "觀眾"}} 結算押中【${{sideChosen}}】（物理開出【${{physicalSide}}】）！`
+            : `@${{data.user_name || "觀眾"}} 結算未中；物理開出【${{physicalSide}}】。`;
+          if (outcomeMismatch && typeof showOverlayStatusToast === "function") {{
+            showOverlayStatusToast("⚠️", "結果校驗", "畫面物理結果與帳務事件不一致，已以帳務事件為準", "#fb7185");
+          }}
+          if (eventWon) {{
             triggerScreenEffects(true);
             sound.playFanfare();
             sound.playCoinShower();
@@ -6717,7 +6760,7 @@ def render_preview_dashboard_html(
         <button class="sub-btn" onclick="triggerEvent({type: 'game.bwei.tossed', user_name: '小明', question: '能通關嗎？', result: 'sheng', name: '聖筊', desc: '神明贊同，大吉大利！', left: 'flat', right: 'curved'})">必出【聖筊（一平一凸）】</button>
         <button class="sub-btn" onclick="triggerEvent({type: 'game.bwei.tossed', user_name: '阿華', question: '該睡了嗎？', result: 'xiao', name: '笑筊', desc: '神明微笑，若有所思。', left: 'flat', right: 'flat'})">必出【笑筊（雙平朝上）】</button>
         <button class="sub-btn" onclick="triggerEvent({type: 'game.bwei.tossed', user_name: '大雄', question: '能吃宵夜？', result: 'yin', name: '陰筊', desc: '神明不允，另擇良時。', left: 'curved', right: 'curved'})">必出【陰筊（雙凸朝上）】</button>
-        <button class="sub-btn" onclick="triggerEvent({type: 'game.bwei.tossed', user_name: '天選之人', question: '會發財嗎？', result: 'standing', name: '立筊', desc: '神蹟顯靈！彩光籠罩！', left: 'curved', right: 'standing'})">神蹟【立筊（萬分之一）】</button>
+        <button class="sub-btn" onclick="triggerEvent({type: 'game.bwei.tossed', user_name: '天選之人', question: '會發財嗎？', result: 'standing', name: '立筊', desc: '神蹟顯靈！彩光籠罩！', left: 'curved', right: 'standing'})">神蹟【立筊（千分之一）】</button>
         <button class="sub-btn danger" onclick="triggerCleanReset('bwei', this)">🚨 重置擲筊</button>
       </div>
       <div class="obs-box">
@@ -7446,12 +7489,12 @@ def render_preview_dashboard_html(
     // 1. 正常單抽 / 十連抽 (二次元動漫立繪與保底機制)
     function playRandomCardGacha(isTen = false) {
       const pool = [
-        { name: "星海夏日 · 詩音", rarity: "SSR", image: "/assets/characters/ssr_shion.png", quote: "載波信號已鎖定，今晚由我伴飛。", icon: "🌟", weight: 4 },
-        { name: "熾天星輝 · 艾莉亞", rarity: "SSR", image: "/assets/characters/ssr_aria.png", quote: "星輝與你同在，願命運為你降下奇蹟。", icon: "✨", weight: 4 },
-        { name: "疾風守護 · 大樹", rarity: "SR", image: "/assets/characters/sr_daiki.png", quote: "交給我吧，前方的道路由我來守護！", icon: "🛡️", weight: 16 },
-        { name: "漫步日常 · 詩音", rarity: "SR", image: "/assets/characters/sr_shion.png", quote: "今天直播很開心呢，一起加油吧～", icon: "🌸", weight: 16 },
-        { name: "冒險茸茸 · 弗芬頓紳士", rarity: "R", image: "/assets/characters/r_fuffington.png", quote: "雖然在下身材嬌小，但冒險的心可是無與倫比！", icon: "🐾", weight: 30 },
-        { name: "晨曦見習 · 莉莉安", rarity: "R", image: "/assets/characters/r_dennis.png", quote: "初次見面，請多指教！", icon: "📖", weight: 30 }
+        { name: "星海夏日 · 詩音", rarity: "SSR", image: "/assets/characters/ssr_shion.png", quote: "載波信號已鎖定，今晚由我伴飛。", icon: "🌟", weight: 2 },
+        { name: "熾天星輝 · 艾莉亞", rarity: "SSR", image: "/assets/characters/ssr_aria.png", quote: "星輝與你同在，願命運為你降下奇蹟。", icon: "✨", weight: 2 },
+        { name: "疾風守護 · 大樹", rarity: "SR", image: "/assets/characters/sr_daiki.png", quote: "交給我吧，前方的道路由我來守護！", icon: "🛡️", weight: 8 },
+        { name: "漫步日常 · 詩音", rarity: "SR", image: "/assets/characters/sr_shion.png", quote: "今天直播很開心呢，一起加油吧～", icon: "🌸", weight: 8 },
+        { name: "冒險茸茸 · 弗芬頓紳士", rarity: "R", image: "/assets/characters/r_fuffington.png", quote: "雖然在下身材嬌小，但冒險的心可是無與倫比！", icon: "🐾", weight: 40 },
+        { name: "晨曦見習 · 莉莉安", rarity: "R", image: "/assets/characters/r_dennis.png", quote: "初次見面，請多指教！", icon: "📖", weight: 40 }
       ];
 
       function pickOne() {
@@ -7497,12 +7540,17 @@ def render_preview_dashboard_html(
     // 2. 正常投幣扭蛋 (實體日式公仔隨機出貨)
     function playRandomGashapon() {
       const toys = [
-        { name: "機甲守衛 Q 版公仔", image: "/assets/toys/toy_robot.png", icon: "🤖", desc: "★ 機甲先鋒限定收藏 ★" },
-        { name: "熱血冒險家 探險公仔", image: "/assets/toys/toy_adventurer.png", icon: "🧭", desc: "★ 遺跡探索限定收藏 ★" },
-        { name: "呆萌小殭屍 萬聖公仔", image: "/assets/toys/toy_zombie.png", icon: "🎃", desc: "★ 夜行狂歡限定收藏 ★" },
-        { name: "弗芬頓紳士 絨毛布偶", image: "/assets/toys/toy_fuff.png", icon: "🧸", desc: "★ 療癒毛球限定收藏 ★" }
+        { name: "機甲守衛 Q 版公仔", image: "/assets/toys/toy_robot.png", icon: "🤖", desc: "★ 機甲先鋒限定收藏 ★", weight: 20 },
+        { name: "熱血冒險家 探險公仔", image: "/assets/toys/toy_adventurer.png", icon: "🧭", desc: "★ 遺跡探索限定收藏 ★", weight: 25 },
+        { name: "呆萌小殭屍 萬聖公仔", image: "/assets/toys/toy_zombie.png", icon: "🎃", desc: "★ 夜行狂歡限定收藏 ★", weight: 30 },
+        { name: "弗芬頓紳士 絨毛布偶", image: "/assets/toys/toy_fuff.png", icon: "🧸", desc: "★ 療癒毛球限定收藏 ★", weight: 25 }
       ];
-      const selected = toys[Math.floor(Math.random() * toys.length)];
+      let roll = Math.random() * toys.reduce((sum, toy) => sum + toy.weight, 0);
+      let selected = toys[toys.length - 1];
+      for (const toy of toys) {
+        roll -= toy.weight;
+        if (roll < 0) { selected = toy; break; }
+      }
       triggerEvent({
         type: "game.gashapon.pulled",
         user_name: "幸運觀眾",
@@ -7519,19 +7567,19 @@ def render_preview_dashboard_html(
       let left = "flat";
       let right = "curved";
 
-      if (r < 0.005) {
+      if (r < 0.001) {
         res = "standing";
         name = "立筊";
-        desc = "萬中選一之神蹟！天地共鑑！";
+        desc = "千中選一之神蹟！天地共鑑！";
         left = "curved";
         right = "standing";
-      } else if (r < 0.52) {
+      } else if (r < 0.501) {
         res = "sheng";
         name = "聖筊";
         desc = "神明應允，所求皆吉！";
         left = "flat";
         right = "curved";
-      } else if (r < 0.77) {
+      } else if (r < 0.751) {
         res = "xiao";
         name = "笑筊";
         desc = "神明微笑，若有所思。";
